@@ -773,40 +773,40 @@ const SettingsModal = ({
     }
     const updateCopy = previewIsVietnamese ? {
         title: 'Cập nhật desktop',
-        description: 'PigTex kiểm tra bản mới và mở trang tải để bạn lấy installer mới nhất.',
+        description: 'PigTex kiểm tra GitHub Releases, tải bản mới và cài ngay trong app khi có thể.',
         availableTitle: (version: string) => `Có PigTex ${version} mới`,
-        availableDescription: 'Bấm Cập nhật ngay để mở trang tải, tải installer và chọn cách cài đặt.',
+        availableDescription: 'Bấm Cập nhật ngay để PigTex tải và cài bản mới. Nếu cài tự động không sẵn sàng, app sẽ mở GitHub Release.',
         upToDateTitle: 'Bạn đang dùng bản mới nhất',
         upToDateDescription: 'Khi có bản mới, PigTex sẽ hiện badge Update ở footer sidebar.',
         failedTitle: 'Không kiểm tra được bản cập nhật',
-        failedDescription: 'Kiểm tra lại mạng hoặc endpoint manifest update.',
+        failedDescription: 'Kiểm tra lại mạng, GitHub Releases, hoặc endpoint manifest fallback.',
         status: 'Trạng thái',
         latestVersion: 'Bản mới nhất',
         lastChecked: 'Kiểm tra lần cuối',
         checkNow: 'Kiểm tra ngay',
         checking: 'Đang kiểm tra...',
-        installNow: 'Cập nhật ngay',
-        installing: 'Đang mở trang tải...',
-        openWebsite: 'Mở trang tải bản cập nhật',
-        updateHint: 'Trong setup sẽ có lựa chọn: gỡ bản cũ rồi cài mới, hoặc giữ bản cũ và cài song song.'
+        installNow: 'Tải và cài đặt',
+        installing: 'Đang tải bản cập nhật...',
+        openWebsite: 'Mở GitHub Release',
+        updateHint: 'Nếu auto-update không chạy được trên máy này, PigTex sẽ mở GitHub Release để bạn cài thủ công.'
     } : {
         title: 'Desktop updates',
-        description: 'PigTex checks for new releases and opens the download page so you can get the latest installer.',
+        description: 'PigTex checks GitHub Releases and installs newer desktop builds in-app when possible.',
         availableTitle: (version: string) => `PigTex ${version} is available`,
-        availableDescription: 'Click Install update to open the download page, get the installer, and choose install mode.',
+        availableDescription: 'Click Install update so PigTex can download and install the new build. If automatic install is unavailable, the app will open the GitHub release page.',
         upToDateTitle: 'You are already on the latest version',
         upToDateDescription: 'When a newer build is published, PigTex will show an Update badge in the sidebar footer.',
         failedTitle: 'Unable to check for updates',
-        failedDescription: 'Check your network connection or the update manifest endpoint.',
+        failedDescription: 'Check your network connection, GitHub Releases, or the fallback update manifest endpoint.',
         status: 'Status',
         latestVersion: 'Latest version',
         lastChecked: 'Last checked',
         checkNow: 'Check now',
         checking: 'Checking...',
-        installNow: 'Install update',
-        installing: 'Opening download page...',
-        openWebsite: 'Open download page',
-        updateHint: 'Setup now offers a choice: uninstall old version first, or keep old version and install side-by-side.'
+        installNow: 'Download and install',
+        installing: 'Downloading update...',
+        openWebsite: 'Open GitHub release',
+        updateHint: 'If automatic installation is unavailable on this machine, PigTex will open the GitHub release page for manual install.'
     }
     const [activeTab, setActiveTab] = useState<SettingsTabId>('connection')
     const [showApiKey, setShowApiKey] = useState(false)

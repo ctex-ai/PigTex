@@ -20,8 +20,10 @@ const releaseDir = path.join(desktopRoot, 'release');
 const stagedOutputDir = path.join(desktopRoot, 'release-staged');
 const stableExeName = `PigTex-${version}.exe`;
 const stableBlockmapName = `PigTex-${version}.exe.blockmap`;
+const latestManifestName = 'latest.yml';
 const stableExeSourcePath = path.join(releaseDir, stableExeName);
 const stableBlockmapSourcePath = path.join(releaseDir, stableBlockmapName);
+const latestManifestSourcePath = path.join(releaseDir, latestManifestName);
 
 if (!fs.existsSync(stableExeSourcePath)) {
     fail(
@@ -37,17 +39,28 @@ if (!fs.existsSync(stableBlockmapSourcePath)) {
     );
 }
 
+if (!fs.existsSync(latestManifestSourcePath)) {
+    fail(
+        `Update manifest not found at ${latestManifestSourcePath}. `
+        + 'Run npm run build:win:release first so auto-update metadata is generated for GitHub Releases.'
+    );
+}
+
 fs.mkdirSync(stagedOutputDir, { recursive: true });
 
 const stagedExePath = path.join(stagedOutputDir, stableExeName);
 const stagedBlockmapPath = path.join(stagedOutputDir, stableBlockmapName);
+const stagedLatestManifestPath = path.join(stagedOutputDir, latestManifestName);
 
 fs.copyFileSync(stableExeSourcePath, stagedExePath);
 fs.copyFileSync(stableBlockmapSourcePath, stagedBlockmapPath);
+fs.copyFileSync(latestManifestSourcePath, stagedLatestManifestPath);
 
 const exeStats = fs.statSync(stagedExePath);
 const blockmapStats = fs.statSync(stagedBlockmapPath);
+const latestManifestStats = fs.statSync(stagedLatestManifestPath);
 
 console.log(`[pigtex release stage] Staged ${stableExeName} (${exeStats.size} bytes)`);
 console.log(`[pigtex release stage] Staged ${stableBlockmapName} (${blockmapStats.size} bytes)`);
+console.log(`[pigtex release stage] Staged ${latestManifestName} (${latestManifestStats.size} bytes)`);
 console.log(`[pigtex release stage] Output directory: ${stagedOutputDir}`);

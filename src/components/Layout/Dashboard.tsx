@@ -183,23 +183,25 @@ const Dashboard = () => {
     }
     const desktopUpdateCopy = useMemo(() => (
         isVietnamese ? {
-            toast: (version: string) => `Có PigTex ${version} mới. Bấm Cập nhật ngay để mở trang tải bản mới nhất.`,
+            toast: (version: string) => `Có PigTex ${version} mới. Bấm Cập nhật ngay để PigTex tải và cài bản mới.`,
             updateAvailable: (version: string) => `PigTex ${version} đã sẵn sàng để tải về và cập nhật.`,
             upToDate: 'PigTex đang ở bản mới nhất',
-            openingUpdateWebsite: 'Đang mở trang tải bản cập nhật...',
-            updateWebsiteOpened: 'Trang tải bản cập nhật đã mở. Hãy tải installer mới và chạy setup.',
-            installFailed: 'Không thể mở trang tải bản cập nhật',
-            openFailed: 'Không thể mở trang tải bản cập nhật',
+            installStarting: 'Đang tải bản cập nhật...',
+            updateInstalling: 'PigTex đã tải xong bản cập nhật và sẽ khởi động lại để hoàn tất cài đặt.',
+            manualInstallOpened: 'Không thể cài tự động. Trang GitHub Release đã được mở để bạn tải installer mới.',
+            installFailed: 'Không thể tải hoặc cài bản cập nhật',
+            openFailed: 'Không thể mở trang GitHub Release',
             checkFailed: 'Không thể kiểm tra bản cập nhật PigTex',
             missingUrl: 'Chưa có liên kết cập nhật'
         } : {
-            toast: (version: string) => `PigTex ${version} is available. Use Update to open the download page and get the latest installer.`,
+            toast: (version: string) => `PigTex ${version} is available. Use Update so PigTex can download and install it.`,
             updateAvailable: (version: string) => `PigTex ${version} is ready to download and install.`,
             upToDate: 'PigTex is already on the latest version',
-            openingUpdateWebsite: 'Opening the download page...',
-            updateWebsiteOpened: 'Download page opened. Download the latest installer and run setup.',
-            installFailed: 'Unable to open the download page',
-            openFailed: 'Unable to open the download page',
+            installStarting: 'Downloading the update...',
+            updateInstalling: 'PigTex finished downloading the update and will restart to complete installation.',
+            manualInstallOpened: 'Automatic install was unavailable. The GitHub release page has been opened for manual download.',
+            installFailed: 'Unable to download or install the update',
+            openFailed: 'Unable to open the GitHub release page',
             checkFailed: 'Unable to check for PigTex updates',
             missingUrl: 'Update link is unavailable'
         }
@@ -371,7 +373,7 @@ const Dashboard = () => {
         }
 
         setIsInstallingDesktopUpdate(true)
-        showInfo(desktopUpdateCopy.openingUpdateWebsite)
+        showInfo(desktopUpdateCopy.installStarting)
 
         try {
             const result = await window.electronAPI.downloadAndInstallDesktopUpdate(
@@ -390,7 +392,12 @@ const Dashboard = () => {
                 return
             }
 
-            showSuccess(desktopUpdateCopy.updateWebsiteOpened)
+            if (result.status === 'opened') {
+                showSuccess(desktopUpdateCopy.manualInstallOpened)
+                return
+            }
+
+            showSuccess(desktopUpdateCopy.updateInstalling)
         } catch (error) {
             console.error('Failed to install desktop update:', error)
             showError(desktopUpdateCopy.installFailed)

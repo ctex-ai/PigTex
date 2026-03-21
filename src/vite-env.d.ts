@@ -37,6 +37,11 @@ interface ElectronAPI {
             currentVersion: string
         }
         | {
+            status: 'installing'
+            currentVersion: string
+            version: string
+        }
+        | {
             status: 'opened'
             currentVersion: string
             version: string

@@ -71,6 +71,7 @@ npm run build:electron
 npm run build:win
 npm run build:win:release
 npm run release:stage
+npm run release:publish
 ```
 
 Backend tests:
@@ -85,11 +86,14 @@ venv\Scripts\python.exe -m unittest discover -s tests -v
 ```powershell
 npm run build:win:release
 npm run release:stage
+npm run release:publish
 ```
 
 - `build:win:release` creates a stable Windows installer in `release/`
-- `release:stage` copies the stable `.exe` and matching `.blockmap` into `release-staged/`
+- `release:stage` copies the stable `.exe`, matching `.blockmap`, and `latest.yml` into `release-staged/`
+- `release:publish` uploads the staged stable assets to the `ctex-ai/PigTex` GitHub Release for that version
 - Preview artifacts such as `PigTex-<version>-preview.exe` are for QA only
+- Stable packaged builds check GitHub Releases for updates and install newer Windows releases in-app
 
 ## Publishing notes
 

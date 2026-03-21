@@ -39,11 +39,13 @@
 </p>
 
 <p align="center">
-  <img src="./assets/texapi_logo.png" alt="TexAPI partner logo" height="42" />
+  <a href="https://texapi.dev" target="_blank" rel="noopener noreferrer">
+    <img src="./assets/texapi_logo.png" alt="TexAPI partner logo" height="42" />
+  </a>
 </p>
 
 <p align="center">
-  <sub><strong>Integrated partner:</strong> TexAPI for managed gateway routing and BYOK-friendly provider access.</sub>
+  <sub><strong>Integrated partner:</strong> <a href="https://texapi.dev" target="_blank" rel="noopener noreferrer">TexAPI</a> is an API gateway provider that gives PigTex access to a broad model catalog through a single API key, with managed routing and BYOK-friendly endpoint control.</sub>
 </p>
 
 > [!IMPORTANT]

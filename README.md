@@ -13,7 +13,7 @@ It intentionally excludes the marketing website, deployment templates, private p
 ## Not included
 
 - Website and download-manifest source
-- Repo-level `data/` prompt packs and Skill Foundry registries
+- Repo-level `data/` prompt packs and optional prompt-catalog registries
 - `deploy/` and `ops/` infrastructure material
 - Real `.env` files, local databases, logs, `node_modules`, and packaged installers
 
@@ -48,9 +48,9 @@ PIGTEX_SKILL_FOUNDRY_DIR=
 ```
 
 - `PIGTEX_DATA_DIR` or `PIGTEX_PROMPT_PACKS_DIR`: external directory that contains `system_prompts/`, `enhancement_rules/`, and related JSON packs
-- `PIGTEX_SKILL_FOUNDRY_DIR`: external Skill Foundry storage directory
+- `PIGTEX_SKILL_FOUNDRY_DIR`: external prompt-catalog storage directory
 
-If these variables are not set, the backend degrades safely and uses local per-device Skill Foundry storage where needed.
+If these variables are not set, the backend degrades safely and uses local per-device storage where needed.
 
 ## Structure
 
@@ -93,6 +93,6 @@ npm run release:stage
 
 ## Publishing notes
 
-- Choose and add an open-source license before pushing this repo public
+- Licensed under [MIT](./LICENSE)
 - Do not commit real `.env` files, signing material, local databases, or packaged installers
 - Keep private prompt/data packs outside this repository

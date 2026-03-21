@@ -183,23 +183,23 @@ const Dashboard = () => {
     }
     const desktopUpdateCopy = useMemo(() => (
         isVietnamese ? {
-            toast: (version: string) => `Có PigTex ${version} mới. Bấm Cập nhật ngay để mở website tải bản mới nhất.`,
-            updateAvailable: (version: string) => `PigTex ${version} đã sẵn sàng để cập nhật qua website.`,
+            toast: (version: string) => `Có PigTex ${version} mới. Bấm Cập nhật ngay để mở trang tải bản mới nhất.`,
+            updateAvailable: (version: string) => `PigTex ${version} đã sẵn sàng để tải về và cập nhật.`,
             upToDate: 'PigTex đang ở bản mới nhất',
-            openingUpdateWebsite: 'Đang mở website cập nhật...',
-            updateWebsiteOpened: 'Website cập nhật đã mở. Hãy tải installer mới và chạy setup.',
-            installFailed: 'Không thể mở website cập nhật',
-            openFailed: 'Không thể mở trang cập nhật',
+            openingUpdateWebsite: 'Đang mở trang tải bản cập nhật...',
+            updateWebsiteOpened: 'Trang tải bản cập nhật đã mở. Hãy tải installer mới và chạy setup.',
+            installFailed: 'Không thể mở trang tải bản cập nhật',
+            openFailed: 'Không thể mở trang tải bản cập nhật',
             checkFailed: 'Không thể kiểm tra bản cập nhật PigTex',
             missingUrl: 'Chưa có liên kết cập nhật'
         } : {
-            toast: (version: string) => `PigTex ${version} is available. Use Update to open the website and download the latest installer.`,
-            updateAvailable: (version: string) => `PigTex ${version} is ready to update from the website.`,
+            toast: (version: string) => `PigTex ${version} is available. Use Update to open the download page and get the latest installer.`,
+            updateAvailable: (version: string) => `PigTex ${version} is ready to download and install.`,
             upToDate: 'PigTex is already on the latest version',
-            openingUpdateWebsite: 'Opening the update website...',
-            updateWebsiteOpened: 'Update website opened. Download the latest installer and run setup.',
-            installFailed: 'Unable to open the update website',
-            openFailed: 'Unable to open the update page',
+            openingUpdateWebsite: 'Opening the download page...',
+            updateWebsiteOpened: 'Download page opened. Download the latest installer and run setup.',
+            installFailed: 'Unable to open the download page',
+            openFailed: 'Unable to open the download page',
             checkFailed: 'Unable to check for PigTex updates',
             missingUrl: 'Update link is unavailable'
         }

@@ -1,8 +1,14 @@
 {
   "name": "pigtex",
   "version": "1.0.32",
-  "description": "AI Knowledge Workstation - Personal AI Assistant",
-  "author": "PigTex Team",
+  "description": "Desktop AI workstation with an Electron/React frontend and FastAPI backend.",
+  "author": "ctex-ai",
+  "license": "MIT",
+  "homepage": "https://github.com/ctex-ai/PigTex",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ctex-ai/PigTex.git"
+  },
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",

@@ -773,9 +773,9 @@ const SettingsModal = ({
     }
     const updateCopy = previewIsVietnamese ? {
         title: 'Cập nhật desktop',
-        description: 'PigTex kiểm tra bản mới và mở website cập nhật để bạn tải installer mới nhất.',
+        description: 'PigTex kiểm tra bản mới và mở trang tải để bạn lấy installer mới nhất.',
         availableTitle: (version: string) => `Có PigTex ${version} mới`,
-        availableDescription: 'Bấm Cập nhật ngay để mở website, tải installer và chọn cách cài đặt.',
+        availableDescription: 'Bấm Cập nhật ngay để mở trang tải, tải installer và chọn cách cài đặt.',
         upToDateTitle: 'Bạn đang dùng bản mới nhất',
         upToDateDescription: 'Khi có bản mới, PigTex sẽ hiện badge Update ở footer sidebar.',
         failedTitle: 'Không kiểm tra được bản cập nhật',
@@ -786,14 +786,14 @@ const SettingsModal = ({
         checkNow: 'Kiểm tra ngay',
         checking: 'Đang kiểm tra...',
         installNow: 'Cập nhật ngay',
-        installing: 'Đang mở website...',
-        openWebsite: 'Mở website cập nhật',
+        installing: 'Đang mở trang tải...',
+        openWebsite: 'Mở trang tải bản cập nhật',
         updateHint: 'Trong setup sẽ có lựa chọn: gỡ bản cũ rồi cài mới, hoặc giữ bản cũ và cài song song.'
     } : {
         title: 'Desktop updates',
-        description: 'PigTex checks for new releases and opens the update website so you can download the latest installer.',
+        description: 'PigTex checks for new releases and opens the download page so you can get the latest installer.',
         availableTitle: (version: string) => `PigTex ${version} is available`,
-        availableDescription: 'Click Install update to open the website, download the installer, and choose install mode.',
+        availableDescription: 'Click Install update to open the download page, get the installer, and choose install mode.',
         upToDateTitle: 'You are already on the latest version',
         upToDateDescription: 'When a newer build is published, PigTex will show an Update badge in the sidebar footer.',
         failedTitle: 'Unable to check for updates',
@@ -804,8 +804,8 @@ const SettingsModal = ({
         checkNow: 'Check now',
         checking: 'Checking...',
         installNow: 'Install update',
-        installing: 'Opening website...',
-        openWebsite: 'Open update website',
+        installing: 'Opening download page...',
+        openWebsite: 'Open download page',
         updateHint: 'Setup now offers a choice: uninstall old version first, or keep old version and install side-by-side.'
     }
     const [activeTab, setActiveTab] = useState<SettingsTabId>('connection')

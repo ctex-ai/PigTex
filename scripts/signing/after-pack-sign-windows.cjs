@@ -2,7 +2,7 @@
 
 const fs = require('fs/promises');
 const path = require('path');
-const { editWindowsResources } = require('./after-pack-edit-windows-resources.cjs');
+const { editWindowsResources } = require('../build/edit-windows-resources.cjs');
 
 const SIGNABLE_EXTENSIONS = new Set(['.exe', '.dll', '.node']);
 

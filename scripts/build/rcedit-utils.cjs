@@ -42,7 +42,7 @@ function resolveRceditPath() {
         return explicitPath;
     }
 
-    const repoVendorPath = path.join(__dirname, '..', 'vendor', 'rcedit');
+    const repoVendorPath = path.join(__dirname, '..', '..', 'vendor', 'rcedit');
     if (hasRceditBinaries(repoVendorPath)) {
         return repoVendorPath;
     }

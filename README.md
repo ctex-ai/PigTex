@@ -60,7 +60,7 @@ If these variables are not set, the backend degrades safely and uses local per-d
 - `docs/`: public-safe desktop documentation
 - `assets/`: source-managed app assets
 - `public/`: Vite public assets served by path at runtime
-- `scripts/`: desktop build and release helper scripts
+- `scripts/`: grouped build, release, signing, and local development helpers
 
 ## Commands
 
@@ -106,3 +106,4 @@ npm run release:publish
 - [Contributing guide](./.github/CONTRIBUTING.md)
 - [Security policy](./.github/SECURITY.md)
 - [Code of conduct](./.github/CODE_OF_CONDUCT.md)
+- [Trust policy](./docs/trust-policy.md)

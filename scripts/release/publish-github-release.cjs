@@ -78,7 +78,22 @@ function runGh(ghPath, args, env) {
     return result.status ?? 1;
 }
 
-const desktopRoot = path.resolve(__dirname, '..');
+function runGhStatus(ghPath, args, env) {
+    const result = spawnSync(ghPath, args, {
+        stdio: 'pipe',
+        encoding: 'utf8',
+        env,
+        shell: false,
+    });
+
+    if (result.error) {
+        fail(result.error.message);
+    }
+
+    return result.status ?? 1;
+}
+
+const desktopRoot = path.resolve(__dirname, '..', '..');
 const desktopPackage = JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'));
 const version = typeof desktopPackage.version === 'string' ? desktopPackage.version.trim() : '';
 
@@ -114,7 +129,7 @@ const ghEnv = {
 };
 
 const prerelease = version.includes('-');
-const viewStatus = runGh(ghPath, ['release', 'view', tag, '--repo', repo], ghEnv);
+const viewStatus = runGhStatus(ghPath, ['release', 'view', tag, '--repo', repo], ghEnv);
 
 if (viewStatus === 0) {
     const uploadStatus = runGh(

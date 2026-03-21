@@ -8,7 +8,7 @@ function fail(message) {
     process.exit(1);
 }
 
-const desktopRoot = path.resolve(__dirname, '..');
+const desktopRoot = path.resolve(__dirname, '..', '..');
 const desktopPackage = JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'));
 const version = typeof desktopPackage.version === 'string' ? desktopPackage.version.trim() : '';
 

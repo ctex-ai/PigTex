@@ -1,6 +1,6 @@
 {
   "extends": "./electron-builder.base.json",
-  "afterPack": "./scripts/after-pack-sign-windows.cjs",
+  "afterPack": "./scripts/signing/after-pack-sign-windows.cjs",
   "forceCodeSigning": true,
   "publish": [
     {
@@ -13,7 +13,7 @@
   "win": {
     "signAndEditExecutable": false,
     "signtoolOptions": {
-      "sign": "./scripts/custom-windows-sign.cjs"
+      "sign": "./scripts/signing/custom-windows-sign.cjs"
     }
   },
   "nsis": {

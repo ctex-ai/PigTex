@@ -4,7 +4,7 @@
 const fsNode = require('fs');
 const pathNode = require('path');
 
-const envFilePath = pathNode.resolve(__dirname, '..', '.env');
+const envFilePath = pathNode.resolve(__dirname, '..', '..', '.env');
 if (fsNode.existsSync(envFilePath)) {
     const envContent = fsNode.readFileSync(envFilePath, 'utf8');
     for (const line of envContent.split(/\r?\n/)) {

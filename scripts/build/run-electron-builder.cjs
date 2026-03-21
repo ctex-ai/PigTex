@@ -2,11 +2,12 @@
 
 const path = require('path');
 const { spawn } = require('child_process');
-const { resolveRceditPath } = require('./windows-rcedit-utils.cjs');
+const { resolveRceditPath } = require('./rcedit-utils.cjs');
 
 async function main() {
     const electronBuilderCliPath = path.join(
         __dirname,
+        '..',
         '..',
         'node_modules',
         'electron-builder',
@@ -24,7 +25,7 @@ async function main() {
 
     const child = spawn(process.execPath, [electronBuilderCliPath, ...process.argv.slice(2)], {
         stdio: 'inherit',
-        cwd: path.join(__dirname, '..'),
+        cwd: path.join(__dirname, '..', '..'),
         env: childEnv,
         windowsHide: false,
     });

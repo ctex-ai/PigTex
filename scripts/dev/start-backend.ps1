@@ -3,7 +3,7 @@ param(
     [switch]$CheckOnly
 )
 
-$projectRoot = Split-Path -Parent $PSScriptRoot
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $backendDir = Join-Path $projectRoot 'backend'
 $pythonExe = Join-Path $backendDir 'venv\Scripts\python.exe'
 $runFile = Join-Path $backendDir 'run.py'

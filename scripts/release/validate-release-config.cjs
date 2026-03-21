@@ -8,8 +8,8 @@ function fail(message) {
     process.exit(1);
 }
 
-const desktopPackagePath = path.resolve(__dirname, '..', 'package.json');
-const releaseConfigPath = path.resolve(__dirname, '..', 'electron-builder.release.json');
+const desktopPackagePath = path.resolve(__dirname, '..', '..', 'package.json');
+const releaseConfigPath = path.resolve(__dirname, '..', '..', 'electron-builder.release.json');
 
 if (!fs.existsSync(desktopPackagePath)) {
     fail(`Missing desktop package manifest at ${desktopPackagePath}`);

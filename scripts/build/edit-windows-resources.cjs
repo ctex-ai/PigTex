@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { runRcedit } = require('./windows-rcedit-utils.cjs');
+const { runRcedit } = require('./rcedit-utils.cjs');
 
 async function editWindowsResources(context) {
     if (process.platform !== 'win32' || context.electronPlatformName !== 'win32') {

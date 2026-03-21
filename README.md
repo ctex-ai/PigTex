@@ -38,6 +38,14 @@
   <a href="./docs/trust-policy.md"><strong>Trust Policy</strong></a>
 </p>
 
+<p align="center">
+  <img src="./assets/texapi_logo.png" alt="TexAPI partner logo" height="42" />
+</p>
+
+<p align="center">
+  <sub><strong>Integrated partner:</strong> TexAPI for managed gateway routing and BYOK-friendly provider access.</sub>
+</p>
+
 > [!IMPORTANT]
 > This repository is the public desktop-only source tree for PigTex.
 > It intentionally excludes the marketing website, deployment infrastructure, private prompt/data packs, local databases, packaged installers, and all real secrets.
@@ -71,6 +79,35 @@
     <td width="33%" valign="top">
       <strong>Public-repo discipline</strong><br />
       Community docs, release guards, and a curated file tree keep the repository presentable for external readers.
+    </td>
+  </tr>
+</table>
+
+## Product Tour
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="./assets/chat.gif" alt="PigTex chat workflow demo" width="100%" />
+      <strong>Focused chat workflow</strong><br />
+      A desktop-first assistant surface built for longer sessions instead of throwaway prompts.
+    </td>
+    <td width="50%" valign="top">
+      <img src="./assets/file.gif" alt="PigTex file workflow demo" width="100%" />
+      <strong>Workspace and file context</strong><br />
+      Local project context, editor flow, and structured desktop work stay inside one app.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="./assets/endpoint.gif" alt="PigTex endpoint configuration demo" width="100%" />
+      <strong>Endpoint and model control</strong><br />
+      Switch between TexAPI and direct providers with user-managed credentials and endpoints.
+    </td>
+    <td width="50%" valign="top">
+      <img src="./assets/backup.gif" alt="PigTex backup workflow demo" width="100%" />
+      <strong>Opt-in backup and sync</strong><br />
+      Cloud backup stays explicit, visible, and separate from local-first desktop usage.
     </td>
   </tr>
 </table>

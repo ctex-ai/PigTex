@@ -96,3 +96,9 @@ npm run release:stage
 - Licensed under [MIT](./LICENSE)
 - Do not commit real `.env` files, signing material, local databases, or packaged installers
 - Keep private prompt/data packs outside this repository
+
+## Community
+
+- [Contributing guide](./.github/CONTRIBUTING.md)
+- [Security policy](./.github/SECURITY.md)
+- [Code of conduct](./.github/CODE_OF_CONDUCT.md)

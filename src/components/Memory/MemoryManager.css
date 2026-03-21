@@ -1,0 +1,324 @@
+.mm-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--surface-base);
+}
+
+.mm-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px 0;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--surface-base);
+    flex-shrink: 0;
+}
+
+.mm-tab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 6px 9px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 6px 6px 0 0;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.mm-tab:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text-secondary);
+}
+
+.mm-tab.active {
+    color: var(--color-accent);
+    background: var(--surface-elevated);
+    border-bottom-color: var(--color-accent);
+}
+
+.mm-tab-label {
+    white-space: nowrap;
+}
+
+.mm-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 10px 14px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.mm-panel::-webkit-scrollbar {
+    width: 4px;
+}
+
+.mm-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.mm-panel::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 99px;
+}
+
+.mm-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.mm-scope-meta {
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+}
+
+.mm-scope-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    color: #5e77f2;
+    background: rgba(94, 119, 242, 0.12);
+    border: 1px solid rgba(94, 119, 242, 0.18);
+    flex-shrink: 0;
+}
+
+.mm-scope-copy {
+    min-width: 0;
+}
+
+.mm-scope-topline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.mm-scope-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+}
+
+.mm-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.mm-badge-active {
+    color: #0f766e;
+    background: rgba(20, 184, 166, 0.12);
+    border: 1px solid rgba(20, 184, 166, 0.22);
+}
+
+.mm-badge-empty {
+    color: var(--color-text-muted);
+    background: var(--color-bg-hover);
+    border: 1px solid var(--color-border);
+}
+
+.mm-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.mm-icon-btn,
+.mm-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: 8px;
+    font-family: var(--font-family);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.mm-icon-btn {
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--color-text-muted);
+}
+
+.mm-icon-btn:hover:not(:disabled) {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+}
+
+.mm-btn {
+    padding: 7px 10px;
+    border: 1px solid transparent;
+}
+
+.mm-btn-primary {
+    color: #fff;
+    background: var(--color-accent);
+}
+
+.mm-btn-primary:hover:not(:disabled) {
+    filter: brightness(1.04);
+}
+
+.mm-btn-secondary {
+    color: var(--color-text-secondary);
+    background: transparent;
+    border-color: var(--color-border);
+}
+
+.mm-btn-secondary:hover:not(:disabled) {
+    background: var(--color-bg-hover);
+    color: var(--color-text-primary);
+}
+
+.mm-btn:disabled,
+.mm-icon-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.mm-alert {
+    padding: 9px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.mm-alert-error {
+    color: #b91c1c;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.22);
+}
+
+.mm-state,
+.mm-display,
+.mm-editor {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--surface-elevated);
+}
+
+.mm-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 180px;
+    padding: 22px 16px;
+    text-align: center;
+    color: var(--color-text-secondary);
+}
+
+.mm-state-empty svg {
+    color: var(--color-text-muted);
+}
+
+.mm-state-loading {
+    min-height: 120px;
+}
+
+.mm-state-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+}
+
+.mm-state-copy {
+    max-width: 240px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+}
+
+.mm-display {
+    min-height: 180px;
+    padding: 10px;
+}
+
+.mm-rules-content {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 11.5px;
+    line-height: 1.65;
+    color: var(--color-text-secondary);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.mm-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+}
+
+.mm-textarea {
+    width: 100%;
+    min-height: 220px;
+    padding: 10px 11px;
+    resize: vertical;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    outline: none;
+    background: var(--surface-base);
+    color: var(--color-text-primary);
+    font-size: 11.5px;
+    line-height: 1.6;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    box-sizing: border-box;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.mm-textarea:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+.mm-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.mm-spin {
+    animation: mm-spin 0.85s linear infinite;
+}
+
+@keyframes mm-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}

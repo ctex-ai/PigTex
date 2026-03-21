@@ -1,0 +1,933 @@
+/* ===================================================================
+   MessageRenderer v2 — Premium Markdown Typography
+   VS Code-level code blocks · Clean hierarchy · Strict spacing
+   =================================================================== */
+
+/* ─── Base Container ─── */
+.message-renderer {
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-primary);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.message-renderer>*:first-child {
+    margin-top: 0;
+}
+
+.message-renderer>*:last-child {
+    margin-bottom: 0;
+}
+
+/* ═══════════════════════════════════════════════════
+   PARAGRAPHS
+   ═══════════════════════════════════════════════════ */
+
+.md-paragraph {
+    margin: 0 0 12px 0;
+    line-height: 1.75;
+    color: var(--color-text-primary);
+}
+
+.md-paragraph:last-child {
+    margin-bottom: 0;
+}
+
+/* Line breaks (from remark-breaks) — important for poems/lyrics */
+.md-paragraph br {
+    content: '';
+    display: block;
+    margin-top: 4px;
+}
+
+/* ═══════════════════════════════════════════════════
+   HEADINGS
+   ═══════════════════════════════════════════════════ */
+
+.md-heading {
+    font-weight: var(--weight-semibold);
+    color: var(--color-text-primary);
+    line-height: var(--leading-tight);
+    margin: 28px 0 12px 0;
+    position: relative;
+}
+
+.md-h1 {
+    font-size: 1.55em;
+    font-weight: var(--weight-bold);
+    padding-bottom: var(--sp-8);
+    border-bottom: 2px solid var(--color-border);
+    letter-spacing: -0.025em;
+}
+
+.md-h2 {
+    font-size: 1.3em;
+    font-weight: var(--weight-semibold);
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--color-border);
+    letter-spacing: -0.015em;
+}
+
+.md-h3 {
+    font-size: 1.12em;
+    font-weight: var(--weight-semibold);
+    letter-spacing: -0.01em;
+}
+
+.md-h4 {
+    font-size: 1em;
+    font-weight: var(--weight-medium);
+    color: var(--color-text-secondary);
+    text-transform: none;
+}
+
+.message-renderer>.md-heading:first-child {
+    margin-top: 0;
+}
+
+/* ═══════════════════════════════════════════════════
+   STRONG & EMPHASIS
+   ═══════════════════════════════════════════════════ */
+
+.md-strong {
+    font-weight: var(--weight-semibold);
+    color: var(--color-text-primary);
+}
+
+.md-em {
+    font-style: italic;
+    color: var(--color-text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════
+   INLINE CODE — Context-aware styling
+   ═══════════════════════════════════════════════════ */
+
+.inline-code {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    margin: 0 2px;
+    font-family: var(--font-mono);
+    font-size: 0.84em;
+    font-weight: var(--weight-medium);
+    border-radius: 5px;
+    white-space: nowrap;
+    vertical-align: baseline;
+    transition: all var(--duration-fast) var(--ease-out);
+}
+
+.inline-code-icon {
+    flex-shrink: 0;
+    opacity: 0.65;
+}
+
+/* Default code style (variables, functions, etc.) */
+.inline-code--code {
+    color: #6366f1;
+    background: rgba(99, 102, 241, 0.07);
+    border: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.dark-mode .inline-code--code {
+    color: #a5b4fc;
+    background: rgba(165, 180, 252, 0.08);
+    border-color: rgba(165, 180, 252, 0.12);
+}
+
+/* File path style */
+.inline-code--path {
+    color: #0d9488;
+    background: rgba(13, 148, 136, 0.06);
+    border: 1px solid rgba(13, 148, 136, 0.12);
+}
+
+.dark-mode .inline-code--path {
+    color: #5eead4;
+    background: rgba(94, 234, 212, 0.08);
+    border-color: rgba(94, 234, 212, 0.12);
+}
+
+/* Command style */
+.inline-code--command {
+    color: #d97706;
+    background: rgba(217, 119, 6, 0.06);
+    border: 1px solid rgba(217, 119, 6, 0.10);
+}
+
+.dark-mode .inline-code--command {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+    border-color: rgba(251, 191, 36, 0.12);
+}
+
+/* ═══════════════════════════════════════════════════
+   CODE BLOCKS — Premium Terminal-style
+   ═══════════════════════════════════════════════════ */
+
+.code-block-wrapper {
+    position: relative;
+    margin: 16px 0;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: #1e1e2e;
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.06),
+        0 0 0 1px rgba(0, 0, 0, 0.03);
+    transition: box-shadow var(--duration-normal) var(--ease-out);
+}
+
+.code-block-wrapper:hover {
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.10),
+        0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.dark-mode .code-block-wrapper {
+    background: #0d1117;
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.dark-mode .code-block-wrapper:hover {
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+/* ─── Code Block Header ─── */
+.code-block-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px 8px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    min-height: 36px;
+}
+
+.dark-mode .code-block-header {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.code-lang-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.code-lang-icon {
+    font-size: 13px;
+    line-height: 1;
+    opacity: 0.9;
+}
+
+.code-language {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    letter-spacing: 0.02em;
+}
+
+.code-line-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.25);
+    padding-left: 8px;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Copy Button ─── */
+.code-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.45);
+    font-family: var(--font-family);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 150ms ease;
+    line-height: 1;
+}
+
+.code-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.code-copy-btn.copied {
+    background: rgba(52, 211, 153, 0.15);
+    color: #6ee7b7;
+    border-color: rgba(52, 211, 153, 0.25);
+}
+
+/* ─── Code Body (with line numbers) ─── */
+.code-body {
+    display: flex;
+    overflow-x: auto;
+}
+
+.code-body--single {
+    display: block;
+}
+
+/* Prevent inherited word wrapping from breaking code into fake lines */
+.code-block-wrapper,
+.code-block-wrapper pre,
+.code-block-wrapper code,
+.code-body,
+.code-body code,
+.code-block-wrapper .hljs,
+.code-body .hljs {
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+}
+
+.code-line-numbers {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 0;
+    min-width: 44px;
+    text-align: right;
+    user-select: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
+}
+
+.dark-mode .code-line-numbers {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.code-line-numbers span {
+    display: block;
+    padding: 0 14px 0 10px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.18);
+    height: calc(12px * 1.7);
+}
+
+/* ─── Code Content ─── */
+.code-block-wrapper pre {
+    margin: 0;
+    padding: 0;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+}
+
+.code-block-wrapper code,
+.code-body code {
+    display: block;
+    padding: 14px 18px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #cdd6f4;
+    overflow-x: auto;
+    white-space: pre !important;
+    tab-size: 4;
+    flex: 1;
+    min-width: 0;
+}
+
+.code-body--single code {
+    padding: 12px 18px;
+}
+
+/* ─── Scrollbar ─── */
+.code-block-wrapper code::-webkit-scrollbar,
+.code-body::-webkit-scrollbar {
+    height: 7px;
+}
+
+.code-block-wrapper code::-webkit-scrollbar-track,
+.code-body::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.code-block-wrapper code::-webkit-scrollbar-thumb,
+.code-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+.code-block-wrapper code::-webkit-scrollbar-thumb:hover,
+.code-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════
+   SYNTAX HIGHLIGHTING — Material Darker palette
+   ═══════════════════════════════════════════════════ */
+
+.code-block-wrapper .hljs,
+.code-body .hljs {
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+/* Keywords: if, else, return, const, let, import, from */
+.code-block-wrapper .hljs-keyword,
+.code-block-wrapper .hljs-selector-tag,
+.code-block-wrapper .hljs-built_in,
+.code-body .hljs-keyword,
+.code-body .hljs-selector-tag,
+.code-body .hljs-built_in {
+    color: #c792ea;
+    font-weight: 500;
+}
+
+/* Strings */
+.code-block-wrapper .hljs-string,
+.code-block-wrapper .hljs-attr,
+.code-body .hljs-string,
+.code-body .hljs-attr {
+    color: #c3e88d;
+}
+
+/* Numbers */
+.code-block-wrapper .hljs-number,
+.code-block-wrapper .hljs-literal,
+.code-body .hljs-number,
+.code-body .hljs-literal {
+    color: #f78c6c;
+}
+
+/* Comments */
+.code-block-wrapper .hljs-comment,
+.code-block-wrapper .hljs-quote,
+.code-body .hljs-comment,
+.code-body .hljs-quote {
+    color: #546e7a;
+    font-style: italic;
+}
+
+/* Functions */
+.code-block-wrapper .hljs-function,
+.code-block-wrapper .hljs-title,
+.code-body .hljs-function,
+.code-body .hljs-title {
+    color: #82aaff;
+}
+
+/* Types, class names */
+.code-block-wrapper .hljs-type,
+.code-block-wrapper .hljs-class .hljs-title,
+.code-body .hljs-type,
+.code-body .hljs-class .hljs-title {
+    color: #ffcb6b;
+}
+
+/* Variables */
+.code-block-wrapper .hljs-variable,
+.code-block-wrapper .hljs-template-variable,
+.code-body .hljs-variable,
+.code-body .hljs-template-variable {
+    color: #f07178;
+}
+
+/* HTML/JSX tags */
+.code-block-wrapper .hljs-tag,
+.code-block-wrapper .hljs-name,
+.code-body .hljs-tag,
+.code-body .hljs-name {
+    color: #f07178;
+}
+
+/* HTML/JSX attributes */
+.code-block-wrapper .hljs-attribute,
+.code-body .hljs-attribute {
+    color: #ffcb6b;
+}
+
+/* Symbols, bullets */
+.code-block-wrapper .hljs-symbol,
+.code-block-wrapper .hljs-bullet,
+.code-body .hljs-symbol,
+.code-body .hljs-bullet {
+    color: #89ddff;
+}
+
+/* Parameters */
+.code-block-wrapper .hljs-params,
+.code-body .hljs-params {
+    color: #babed8;
+}
+
+/* Meta/decorators */
+.code-block-wrapper .hljs-meta,
+.code-body .hljs-meta {
+    color: #82aaff;
+}
+
+.code-block-wrapper .hljs-meta .hljs-keyword,
+.code-body .hljs-meta .hljs-keyword {
+    color: #c792ea;
+}
+
+/* Regex */
+.code-block-wrapper .hljs-regexp,
+.code-body .hljs-regexp {
+    color: #89ddff;
+}
+
+/* Diff: additions and deletions */
+.code-block-wrapper .hljs-addition,
+.code-body .hljs-addition {
+    color: #c3e88d;
+    background: rgba(195, 232, 141, 0.08);
+}
+
+.code-block-wrapper .hljs-deletion,
+.code-body .hljs-deletion {
+    color: #f07178;
+    background: rgba(240, 113, 120, 0.08);
+}
+
+/* Property */
+.code-block-wrapper .hljs-property,
+.code-body .hljs-property {
+    color: #89ddff;
+}
+
+/* Selector (CSS) */
+.code-block-wrapper .hljs-selector-class,
+.code-body .hljs-selector-class {
+    color: #ffcb6b;
+}
+
+.code-block-wrapper .hljs-selector-id,
+.code-body .hljs-selector-id {
+    color: #82aaff;
+}
+
+.code-block-wrapper .hljs-selector-pseudo,
+.code-body .hljs-selector-pseudo {
+    color: #c792ea;
+}
+
+/* ═══════════════════════════════════════════════════
+   LISTS — Clean and readable
+   ═══════════════════════════════════════════════════ */
+
+.md-list {
+    margin: 8px 0 16px 0;
+    padding-left: 24px;
+}
+
+.md-ul {
+    list-style-type: none;
+}
+
+.md-ul>.md-li {
+    position: relative;
+    padding-left: 4px;
+}
+
+.md-ul>.md-li::before {
+    content: '';
+    position: absolute;
+    left: -16px;
+    top: 10px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    opacity: 0.6;
+}
+
+/* Nested bullet style */
+.md-ul .md-ul>.md-li::before {
+    background: transparent;
+    border: 1.5px solid var(--color-accent);
+    opacity: 0.4;
+    width: 4px;
+    height: 4px;
+}
+
+.md-ol {
+    list-style-type: none;
+    counter-reset: md-counter;
+}
+
+.md-ol>.md-li {
+    counter-increment: md-counter;
+    position: relative;
+    padding-left: 4px;
+}
+
+.md-ol>.md-li::before {
+    content: counter(md-counter) '.';
+    position: absolute;
+    left: -24px;
+    width: 20px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--weight-semibold);
+    font-size: 0.85em;
+    color: var(--color-accent);
+    opacity: 0.7;
+    top: 2px;
+}
+
+.md-li {
+    margin-bottom: 6px;
+    line-height: 1.75;
+    color: var(--color-text-primary);
+}
+
+.md-li>.md-list {
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
+/* ═══════════════════════════════════════════════════
+   BLOCKQUOTES — Subtle callout style
+   ═══════════════════════════════════════════════════ */
+
+.md-blockquote {
+    margin: 18px 0;
+    padding: 14px 20px;
+    border-left: 3px solid var(--color-accent);
+    background: var(--color-accent-soft);
+    border-radius: 0 8px 8px 0;
+    color: var(--color-text-secondary);
+    font-style: italic;
+    font-size: 0.96em;
+    line-height: 1.8;
+    position: relative;
+}
+
+.dark-mode .md-blockquote {
+    background: rgba(129, 140, 248, 0.05);
+}
+
+.md-blockquote p {
+    margin: 0 0 8px 0;
+}
+
+.md-blockquote p:last-child {
+    margin-bottom: 0;
+}
+
+/* ═══════════════════════════════════════════════════
+   TABLES — Stripe + subtle hover
+   ═══════════════════════════════════════════════════ */
+
+.table-wrapper {
+    margin: 20px 0;
+    overflow-x: auto;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-xs);
+}
+
+.table-wrapper table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+}
+
+.table-wrapper th {
+    padding: 10px 16px;
+    text-align: left;
+    font-weight: var(--weight-semibold);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-secondary);
+    background: var(--surface-sidebar);
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+}
+
+.table-wrapper td {
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text-primary);
+    line-height: 1.5;
+}
+
+.table-wrapper tr:last-child td {
+    border-bottom: none;
+}
+
+/* Striped rows */
+.table-wrapper tbody tr:nth-child(even) {
+    background: rgba(0, 0, 0, 0.015);
+}
+
+.dark-mode .table-wrapper tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.table-wrapper tr:hover td {
+    background: var(--color-bg-hover);
+}
+
+/* ═══════════════════════════════════════════════════
+   LINKS
+   ═══════════════════════════════════════════════════ */
+
+.md-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--color-accent) !important;
+    text-decoration: none;
+    font-weight: var(--weight-medium);
+    border-bottom: 1px solid transparent;
+    transition: all var(--duration-fast) var(--ease-out);
+}
+
+.md-link:hover {
+    border-bottom-color: var(--color-accent);
+}
+
+.md-link-icon {
+    opacity: 0.5;
+    transition: opacity var(--duration-fast) ease;
+    flex-shrink: 0;
+}
+
+.md-link:hover .md-link-icon {
+    opacity: 0.85;
+}
+
+/* ═══════════════════════════════════════════════════
+   HORIZONTAL RULE
+   ═══════════════════════════════════════════════════ */
+
+.md-hr-wrapper {
+    margin: 32px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.md-hr {
+    border: none;
+    width: 100%;
+    height: 0;
+    border-top: 1px dashed var(--color-border);
+}
+
+/* ═══════════════════════════════════════════════════
+   IMAGES
+   ═══════════════════════════════════════════════════ */
+
+.md-image-wrapper {
+    margin: 20px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-8);
+}
+
+.md-image {
+    max-width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+}
+
+.md-image-caption {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    font-style: italic;
+}
+
+/* ═══════════════════════════════════════════════════
+   STREAMING ANIMATIONS
+   ═══════════════════════════════════════════════════ */
+
+.streaming-cursor {
+    display: inline-block;
+    animation: cursor-blink 1s step-end infinite;
+    color: var(--color-accent);
+    font-weight: var(--weight-normal);
+    margin-left: 2px;
+}
+
+.streaming-plain-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: var(--color-text-primary);
+}
+
+.streaming-markdown-live>*:last-child {
+    margin-bottom: 0;
+}
+
+.streaming-plain-text-tail {
+    margin-top: 10px;
+}
+
+@keyframes cursor-blink {
+
+    0%,
+    50% {
+        opacity: 1;
+    }
+
+    51%,
+    100% {
+        opacity: 0;
+    }
+}
+
+.streaming-placeholder {
+    padding: var(--sp-8) 0;
+}
+
+.streaming-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.streaming-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    animation: dot-pulse 1.4s ease-in-out infinite;
+}
+
+.streaming-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.streaming-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes dot-pulse {
+
+    0%,
+    80%,
+    100% {
+        opacity: 0.3;
+        transform: scale(0.8);
+    }
+
+    40% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* ═══════════════════════════════════════════════════
+   KATEX
+   ═══════════════════════════════════════════════════ */
+
+.message-renderer .katex-display {
+    margin: var(--sp-16) 0;
+    overflow-x: auto;
+    padding: var(--sp-8) 0;
+}
+
+.message-renderer .katex {
+    font-size: 1.05em;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK LISTS (GFM checkboxes)
+   ═══════════════════════════════════════════════════ */
+
+.message-renderer input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--color-border-hover);
+    border-radius: 4px;
+    margin-right: 8px;
+    vertical-align: middle;
+    position: relative;
+    cursor: default;
+    top: -1px;
+    transition: all var(--duration-fast) ease;
+}
+
+.message-renderer input[type="checkbox"]:checked {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.message-renderer input[type="checkbox"]:checked::after {
+    content: '✓';
+    position: absolute;
+    top: -1px;
+    left: 2px;
+    color: white;
+    font-size: 11px;
+    font-weight: var(--weight-bold);
+}
+
+/* ═══════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+    .code-block-wrapper code,
+    .code-body code {
+        font-size: 12px;
+        padding: 12px 14px;
+    }
+
+    .code-line-numbers {
+        min-width: 36px;
+        padding: 12px 0;
+    }
+
+    .code-line-numbers span {
+        padding: 0 10px 0 8px;
+        font-size: 10px;
+    }
+
+    .table-wrapper {
+        font-size: var(--text-xs);
+    }
+
+    .md-heading.md-h1 {
+        font-size: 1.35em;
+    }
+
+    .md-heading.md-h2 {
+        font-size: 1.2em;
+    }
+
+    .code-block-header {
+        padding: 5px 10px;
+    }
+
+    .code-lang-info {
+        gap: 6px;
+    }
+
+    .code-line-count {
+        display: none;
+    }
+}

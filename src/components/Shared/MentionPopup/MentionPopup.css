@@ -1,0 +1,288 @@
+/* ===== MentionPopup Styles ===== */
+
+.mention-popup {
+    position: absolute;
+    z-index: 200;
+    background: var(--surface-secondary, #1e1e2e);
+    border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.08));
+    border-radius: 12px;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(20px);
+    overflow: hidden;
+    max-height: 320px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+.mention-popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-primary, rgba(255, 255, 255, 0.06));
+    gap: 8px;
+}
+
+.mention-popup-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.mention-popup-header-left svg {
+    opacity: 0.6;
+}
+
+.mention-popup-query {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--color-accent, #818cf8);
+    background: var(--color-accent-soft, rgba(129, 140, 248, 0.08));
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mention-popup-query svg {
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+/* Items list */
+.mention-popup-list {
+    overflow-y: auto;
+    max-height: 240px;
+    padding: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+.mention-popup-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.mention-popup-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+}
+
+/* Empty state */
+.mention-popup-empty {
+    padding: 16px 12px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.35));
+}
+
+/* Item button */
+.mention-popup-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary, rgba(255, 255, 255, 0.85));
+    cursor: pointer;
+    font-size: 13px;
+    text-align: left;
+    transition: background 0.12s ease;
+    min-height: 32px;
+}
+
+.mention-popup-item:hover,
+.mention-popup-item.active {
+    background: var(--color-accent-soft, rgba(129, 140, 248, 0.1));
+}
+
+.mention-popup-item.active {
+    background: var(--color-accent-soft, rgba(129, 140, 248, 0.15));
+}
+
+/* Item icon */
+.mention-item-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+}
+
+.mention-item-icon svg {
+    opacity: 0.6;
+}
+
+.mention-type-folder .mention-item-icon {
+    color: var(--color-accent, #818cf8);
+}
+
+.mention-type-folder .mention-item-icon svg {
+    opacity: 0.8;
+}
+
+.mention-item-emoji {
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* Item name */
+.mention-item-name {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+    max-width: 180px;
+}
+
+.mention-type-folder .mention-item-name {
+    color: var(--color-accent, #818cf8);
+}
+
+/* Item path */
+.mention-item-path {
+    font-size: 11px;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.3));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-left: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* Footer */
+.mention-popup-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border-primary, rgba(255, 255, 255, 0.06));
+    font-size: 10px;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.3));
+}
+
+.mention-popup-footer kbd {
+    font-family: inherit;
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary, rgba(255, 255, 255, 0.45));
+    margin-right: 2px;
+}
+
+/* ===== Mention Tags in Textarea ===== */
+
+.mention-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    vertical-align: baseline;
+}
+
+.mention-tag-file {
+    background: rgba(129, 140, 248, 0.12);
+    color: var(--color-accent, #818cf8);
+    border: 1px solid rgba(129, 140, 248, 0.2);
+}
+
+.mention-tag-folder {
+    background: rgba(251, 191, 36, 0.1);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.2);
+}
+
+.mention-tag svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+/* ===== Mention chips in chat input preview ===== */
+
+.chat-mention-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 12px 0 12px;
+}
+
+.chat-mention-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px 2px 6px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.chat-mention-chip-file {
+    background: rgba(129, 140, 248, 0.1);
+    color: var(--color-accent, #818cf8);
+    border-color: rgba(129, 140, 248, 0.15);
+}
+
+.chat-mention-chip-folder {
+    background: rgba(251, 191, 36, 0.08);
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.15);
+}
+
+.chat-mention-chip:hover {
+    filter: brightness(1.2);
+}
+
+.chat-mention-chip svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.chat-mention-chip-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+    margin-left: 2px;
+    transition: all 0.12s ease;
+    border: none;
+    padding: 0;
+}
+
+.chat-mention-chip-remove:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}

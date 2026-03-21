@@ -1,0 +1,139 @@
+/* ===================================================================
+   Dashboard — App Shell · Structural Grid
+   3-column layout: Sidebar | Main | Right Panel
+   No floating. No absolute. Pure flexbox.
+   =================================================================== */
+
+.dashboard {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--surface-base);
+}
+
+/* ===== 3-Column Grid ===== */
+.dashboard-content {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    position: relative;
+}
+
+/* Column 1: Sidebar — width controlled by Dashboard state */
+.dashboard-sidebar {
+    flex: 0 0 auto;
+    height: 100%;
+    background: var(--surface-sidebar);
+    overflow: hidden;
+    min-width: 0;
+    transition: width 160ms var(--ease-out);
+}
+
+.dashboard-sidebar.is-collapsed {
+    border-right: 1px solid var(--color-border);
+}
+
+.dashboard-sidebar.is-resizing {
+    transition: none;
+}
+
+/* Column 2: Main — flex grow, constrained content */
+.dashboard-main {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--surface-primary);
+}
+
+.dashboard-main-view {
+    width: 100%;
+    height: 100%;
+}
+
+.dashboard-main-view.is-hidden {
+    display: none;
+}
+
+/* Splitters */
+.dashboard-resizer {
+    position: relative;
+    flex: 0 0 10px;
+    width: 10px;
+    height: 100%;
+    cursor: col-resize;
+    touch-action: none;
+    z-index: 2;
+}
+
+.dashboard-resizer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    transform: translateX(-50%);
+    background: var(--color-border);
+    transition: background var(--duration-fast) var(--ease-out),
+        box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.dashboard-resizer-grip {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 4px;
+    height: 40px;
+    transform: translate(-50%, -50%);
+    border-radius: var(--radius-full);
+    background: linear-gradient(180deg, var(--color-border-hover), var(--color-border));
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out),
+        background var(--duration-fast) var(--ease-out);
+}
+
+.dashboard-resizer:hover::before,
+.dashboard-resizer.is-active::before {
+    background: var(--color-border-accent);
+    box-shadow: 0 0 0 1px var(--color-accent-glow);
+}
+
+.dashboard-resizer:hover .dashboard-resizer-grip,
+.dashboard-resizer.is-active .dashboard-resizer-grip {
+    opacity: 1;
+    background: linear-gradient(180deg, var(--color-accent), var(--color-accent-hover));
+}
+
+/* Column 3: Right Panel — width controlled by Dashboard state */
+.dashboard-right-panel {
+    flex: 0 0 auto;
+    height: 100%;
+    background: var(--surface-base);
+    overflow: hidden;
+    min-width: 0;
+    transition: width 160ms var(--ease-out);
+}
+
+.dashboard-right-panel.is-resizing {
+    transition: none;
+}
+
+/* ===== View Containers ===== */
+.chat-centered-view {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.editor-view {
+    height: 100%;
+}
+
+body.dashboard-is-resizing,
+body.dashboard-is-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}

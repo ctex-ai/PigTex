@@ -1,0 +1,37 @@
+{
+  "appId": "com.pigtex.app",
+  "productName": "PigTex",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "assets/pigtex_logo.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "include": "scripts/nsis-install-mode.nsh",
+    "allowElevation": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "PigTex",
+    "installerIcon": "assets/pigtex_logo.ico",
+    "uninstallerIcon": "assets/pigtex_logo.ico",
+    "installerHeaderIcon": "assets/pigtex_logo.ico",
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false
+  },
+  "compression": "store"
+}

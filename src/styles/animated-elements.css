@@ -1,0 +1,518 @@
+/* ===================================================================
+   Animated Elements — PigTex Design System v4
+   Structural animations only. No decorative glows or shimmer.
+   =================================================================== */
+
+/* ===== PigTex Mascot ===== */
+.pig-mascot {
+    transition: filter 200ms var(--ease-out);
+}
+
+.pig-animated .pig-wave {
+    transform-origin: 155px 75px;
+    animation: wave 2.5s ease-in-out infinite;
+}
+
+.pig-animated .pig-glow {
+    animation: glow-pulse 3s ease-in-out infinite;
+}
+
+.pig-animated .pig-ear-left {
+    transform-origin: 62px 50px;
+    animation: ear-wiggle-left 4s ease-in-out infinite;
+}
+
+.pig-animated .pig-ear-right {
+    transform-origin: 138px 50px;
+    animation: ear-wiggle-right 4s ease-in-out infinite 0.3s;
+}
+
+.pig-animated .pig-eyes {
+    animation: blink 4s ease-in-out infinite;
+}
+
+.pig-animated .pig-sparkles path {
+    animation: twinkle 2s ease-in-out infinite;
+}
+
+.pig-animated .pig-sparkles path:nth-child(2) {
+    animation-delay: 0.5s;
+}
+
+.pig-animated .pig-sparkles path:nth-child(3) {
+    animation-delay: 1s;
+}
+
+.pig-animated .pig-sparkles path:nth-child(4) {
+    animation-delay: 1.5s;
+}
+
+@keyframes wave {
+
+    0%,
+    100% {
+        transform: rotate(0deg);
+    }
+
+    15% {
+        transform: rotate(14deg);
+    }
+
+    30% {
+        transform: rotate(-8deg);
+    }
+
+    45% {
+        transform: rotate(14deg);
+    }
+
+    60% {
+        transform: rotate(-4deg);
+    }
+
+    75% {
+        transform: rotate(10deg);
+    }
+}
+
+@keyframes glow-pulse {
+
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
+}
+
+@keyframes ear-wiggle-left {
+
+    0%,
+    100% {
+        transform: rotate(0deg);
+    }
+
+    25% {
+        transform: rotate(-5deg);
+    }
+
+    75% {
+        transform: rotate(3deg);
+    }
+}
+
+@keyframes ear-wiggle-right {
+
+    0%,
+    100% {
+        transform: rotate(0deg);
+    }
+
+    25% {
+        transform: rotate(5deg);
+    }
+
+    75% {
+        transform: rotate(-3deg);
+    }
+}
+
+@keyframes blink {
+
+    0%,
+    96%,
+    100% {
+        transform: scaleY(1);
+    }
+
+    98% {
+        transform: scaleY(0.05);
+    }
+}
+
+@keyframes twinkle {
+
+    0%,
+    100% {
+        opacity: 0.3;
+        transform: scale(0.8);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.2);
+    }
+}
+
+/* ===== PigTex Logo ===== */
+.pigtex-logo {
+    transition: transform 200ms var(--ease-out);
+}
+
+/* ===== Bot Avatar ===== */
+.bot-avatar-svg {
+    transition: filter 200ms var(--ease-out);
+}
+
+/* ===== Thinking Indicator ===== */
+.thinking-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-8);
+    padding: var(--sp-8) var(--sp-16);
+    background: var(--surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+}
+
+.thinking-sm {
+    padding: var(--sp-4) var(--sp-8);
+    gap: var(--sp-4);
+}
+
+.thinking-lg {
+    padding: var(--sp-16) var(--sp-24);
+    gap: var(--sp-8);
+}
+
+.thinking-icon {
+    color: var(--color-accent);
+    display: flex;
+    align-items: center;
+}
+
+.thinking-orbit {
+    animation: thinking-orbit-spin 3s linear infinite;
+    transform-origin: center;
+}
+
+.thinking-orbit-reverse {
+    animation: thinking-orbit-spin 4s linear infinite reverse;
+    transform-origin: center;
+}
+
+.thinking-core {
+    animation: thinking-core-pulse 1.5s ease-in-out infinite;
+    transform-origin: center;
+}
+
+@keyframes thinking-orbit-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes thinking-core-pulse {
+
+    0%,
+    100% {
+        opacity: 0.7;
+        transform: scale(0.9);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+}
+
+.thinking-dots {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.thinking-dots span {
+    border-radius: 50%;
+    background: var(--color-accent);
+    animation: thinking-bounce 1.4s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) {
+    animation-delay: 0.16s;
+}
+
+.thinking-dots span:nth-child(3) {
+    animation-delay: 0.32s;
+}
+
+.thinking-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    font-weight: var(--weight-medium);
+}
+
+@keyframes thinking-bounce {
+
+    0%,
+    80%,
+    100% {
+        transform: scale(0.6);
+        opacity: 0.4;
+    }
+
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* ===== Empty State ===== */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-48) var(--sp-24);
+    text-align: center;
+    gap: var(--sp-16);
+}
+
+.empty-state-icon {
+    margin-bottom: var(--sp-8);
+}
+
+.empty-state-title {
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+.empty-state-description {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    margin: 0;
+    max-width: 280px;
+    line-height: var(--leading-relaxed);
+}
+
+/* ===== Floating ===== */
+.float-slow {
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-4px);
+    }
+}
+
+/* ===== Dot pulse ===== */
+.dot-pulse-1 {
+    animation: dot-fade 1.4s ease-in-out infinite;
+}
+
+.dot-pulse-2 {
+    animation: dot-fade 1.4s ease-in-out infinite 0.2s;
+}
+
+.dot-pulse-3 {
+    animation: dot-fade 1.4s ease-in-out infinite 0.4s;
+}
+
+@keyframes dot-fade {
+
+    0%,
+    80%,
+    100% {
+        opacity: 0.3;
+        r: 3px;
+    }
+
+    40% {
+        opacity: 1;
+        r: 4.5px;
+    }
+}
+
+/* ===== Sparkle ===== */
+.sparkle-1 {
+    animation: sparkle-float 2.5s ease-in-out infinite;
+}
+
+.sparkle-2 {
+    animation: sparkle-float 3s ease-in-out infinite 0.5s;
+}
+
+.sparkle-3 {
+    animation: sparkle-float 2s ease-in-out infinite 1s;
+}
+
+@keyframes sparkle-float {
+
+    0%,
+    100% {
+        opacity: 0.3;
+        transform: scale(0.8);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.2);
+    }
+}
+
+/* ===== AI Avatar Glow (streaming) ===== */
+.message-assistant .message-avatar {
+    transition: box-shadow 200ms var(--ease-out);
+}
+
+.message-assistant.is-streaming .message-avatar,
+.message-assistant .message-avatar.streaming {
+    box-shadow: 0 0 12px var(--color-accent-glow);
+    animation: avatar-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes avatar-glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 8px var(--color-accent-soft);
+    }
+
+    50% {
+        box-shadow: 0 0 16px var(--color-accent-glow);
+    }
+}
+
+/* ===== Auth Background ===== */
+.auth-bg-decoration {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.auth-bg-svg {
+    width: 100%;
+    height: 100%;
+    opacity: 1;
+}
+
+/* ===== Loading Skeleton ===== */
+.skeleton {
+    background: linear-gradient(90deg,
+            var(--color-bg-hover) 25%,
+            var(--color-bg-active) 37%,
+            var(--color-bg-hover) 63%);
+    background-size: 400% 100%;
+    animation: skeleton-loading 1.4s ease infinite;
+    border-radius: var(--radius-sm);
+}
+
+.skeleton-text {
+    height: 14px;
+    margin-bottom: var(--sp-8);
+}
+
+.skeleton-text:last-child {
+    width: 60%;
+}
+
+.skeleton-circle {
+    border-radius: 50%;
+}
+
+@keyframes skeleton-loading {
+    0% {
+        background-position: 100% 50%;
+    }
+
+    100% {
+        background-position: 0 50%;
+    }
+}
+
+/* ===== Status Dot ===== */
+.status-dot {
+    position: relative;
+}
+
+.status-dot::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    background: var(--color-success);
+    opacity: 0;
+    animation: status-ripple 2.5s ease-out infinite;
+}
+
+@keyframes status-ripple {
+    0% {
+        transform: scale(0.5);
+        opacity: 0.5;
+    }
+
+    100% {
+        transform: scale(2.5);
+        opacity: 0;
+    }
+}
+
+/* ===== Message Entry ===== */
+@keyframes message-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ===== Auth Title Gradient ===== */
+.auth-title {
+    background-size: 200% 200%;
+    animation: gradient-shimmer 5s ease-in-out infinite;
+}
+
+@keyframes gradient-shimmer {
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+}
+
+/* ===== Auth Container ===== */
+.auth-container {
+    animation: breathe 6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 var(--color-accent-soft);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.02);
+    }
+}
+
+/* ===== Focus Ring ===== */
+.form-input:focus {
+    box-shadow: var(--shadow-focus);
+}

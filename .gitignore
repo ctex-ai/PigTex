@@ -1,0 +1,43 @@
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.production.example
+
+# Node / Electron artifacts
+node_modules/
+.npm-cache/
+dist/
+dist-electron/
+release/
+release-staged/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+index-*.js
+
+# Python and backend runtime artifacts
+backend/venv/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+backend/logs/
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+.pytest_cache/
+.mypy_cache/
+
+# Local logs and temp outputs
+*.log
+backend/test_output.txt
+assets/tmpclaude-*-cwd
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,53 @@
+/* ===== Toast Notifications ===== */
+
+.pigtex-toast {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-8) !important;
+    padding: var(--sp-8) var(--sp-24) !important;
+    border-radius: var(--radius-lg) !important;
+    font-family: var(--font-family) !important;
+    font-size: var(--text-sm) !important;
+    font-weight: var(--weight-medium) !important;
+    border: 1px solid !important;
+    box-shadow: var(--shadow-xl) !important;
+    min-width: 220px;
+    max-width: 420px;
+    animation: fadeInUp 200ms var(--ease-out) forwards;
+}
+
+.pigtex-toast-success {
+    background: rgba(52, 211, 153, 0.08) !important;
+    border-color: rgba(52, 211, 153, 0.15) !important;
+    color: #059669 !important;
+}
+
+.dark-mode .pigtex-toast-success {
+    background: rgba(52, 211, 153, 0.10) !important;
+    border-color: rgba(52, 211, 153, 0.18) !important;
+    color: #6ee7b7 !important;
+}
+
+.pigtex-toast-error {
+    background: rgba(248, 113, 113, 0.08) !important;
+    border-color: rgba(248, 113, 113, 0.15) !important;
+    color: #dc2626 !important;
+}
+
+.dark-mode .pigtex-toast-error {
+    background: rgba(248, 113, 113, 0.10) !important;
+    border-color: rgba(248, 113, 113, 0.18) !important;
+    color: #fca5a5 !important;
+}
+
+.pigtex-toast-info {
+    background: rgba(99, 102, 241, 0.08) !important;
+    border-color: rgba(99, 102, 241, 0.15) !important;
+    color: #4f46e5 !important;
+}
+
+.dark-mode .pigtex-toast-info {
+    background: rgba(129, 140, 248, 0.10) !important;
+    border-color: rgba(129, 140, 248, 0.18) !important;
+    color: #a5b4fc !important;
+}

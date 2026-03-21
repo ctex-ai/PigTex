@@ -1,0 +1,126 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE must be set}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER must be set}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    expose:
+      - "3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command: ["sh", "-c", "redis-server --appendonly no --requirepass \"$${REDIS_PASSWORD}\""]
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      APP_ENV: production
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:?MYSQL_USER must be set}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
+      DB_NAME: ${MYSQL_DATABASE:?MYSQL_DATABASE must be set}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: production
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:?MYSQL_USER must be set}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
+      DB_NAME: ${MYSQL_DATABASE:?MYSQL_DATABASE must be set}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+      AUTO_CREATE_DB_SCHEMA: "false"
+      DB_STARTUP_MAX_RETRIES: "60"
+      DB_STARTUP_RETRY_INTERVAL_SECONDS: "2.0"
+      REQUIRE_DB_MIGRATION_HEAD_ON_STARTUP: "true"
+      ENABLE_RATE_LIMIT: "true"
+      RATE_LIMIT_BACKEND: redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      RATE_LIMIT_KEY_PREFIX: pigtex:ratelimit
+      RATE_LIMIT_REDIS_SOCKET_TIMEOUT_SECONDS: "1.0"
+      ENABLE_IDEMPOTENCY: "true"
+      IDEMPOTENCY_BACKEND: redis
+      IDEMPOTENCY_KEY_PREFIX: pigtex:idempotency
+      IDEMPOTENCY_TTL_SECONDS: "86400"
+      IDEMPOTENCY_LOCK_TTL_SECONDS: "30"
+      IDEMPOTENCY_MAX_CACHED_RESPONSE_BYTES: "262144"
+      OAUTH_STATE_BACKEND: ${OAUTH_STATE_BACKEND:-redis}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.example.com,null}
+      CLOUD_BACKUP_ENABLED: ${CLOUD_BACKUP_ENABLED:-false}
+      SPACES_REGION: ${SPACES_REGION:-}
+      SPACES_ENDPOINT_URL: ${SPACES_ENDPOINT_URL:-}
+      SPACES_BUCKET_BACKUPS: ${SPACES_BUCKET_BACKUPS:-}
+      SPACES_BUCKET_SHARED: ${SPACES_BUCKET_SHARED:-}
+      SPACES_ACCESS_KEY_ID: ${SPACES_ACCESS_KEY_ID:-}
+      SPACES_SECRET_ACCESS_KEY: ${SPACES_SECRET_ACCESS_KEY:-}
+      SPACES_CDN_URL: ${SPACES_CDN_URL:-}
+      SPACES_ADDRESSING_STYLE: ${SPACES_ADDRESSING_STYLE:-virtual}
+      SPACES_SIGNED_URL_TTL_SECONDS: ${SPACES_SIGNED_URL_TTL_SECONDS:-900}
+      SYNC_BILLING_ENABLED: ${SYNC_BILLING_ENABLED:-false}
+      SYNC_BILLING_PROVIDER: ${SYNC_BILLING_PROVIDER:-mock}
+      SYNC_CHECKOUT_SUCCESS_URL: ${SYNC_CHECKOUT_SUCCESS_URL:-https://app.example.com/billing/sync/success}
+      SYNC_CHECKOUT_CANCEL_URL: ${SYNC_CHECKOUT_CANCEL_URL:-https://app.example.com/billing/sync/cancel}
+      SYNC_PORTAL_RETURN_URL: ${SYNC_PORTAL_RETURN_URL:-https://app.example.com/settings/billing}
+      SYNC_PAYOS_CLIENT_ID: ${SYNC_PAYOS_CLIENT_ID:-}
+      SYNC_PAYOS_API_KEY: ${SYNC_PAYOS_API_KEY:-}
+      SYNC_PAYOS_CHECKSUM_KEY: ${SYNC_PAYOS_CHECKSUM_KEY:-}
+      SYNC_PAYOS_PARTNER_CODE: ${SYNC_PAYOS_PARTNER_CODE:-}
+      SYNC_PAYOS_PAYMENT_LINK_EXPIRY_MINUTES: ${SYNC_PAYOS_PAYMENT_LINK_EXPIRY_MINUTES:-30}
+      HOST: 0.0.0.0
+      PORT: 3001
+    ports:
+      - "3001:3001"
+
+volumes:
+  mysql_data:

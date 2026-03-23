@@ -108,6 +108,7 @@ class SearchContext:
     warnings: List[str] = field(default_factory=list)
     query_focus: Optional[str] = None
     answer_guidance: List[str] = field(default_factory=list)
+    status_hint: Optional[str] = None
 
     @property
     def has_results(self) -> bool:

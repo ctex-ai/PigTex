@@ -1324,6 +1324,8 @@ const getWebSearchStatusLabel = (status: WebSearchMetadata['status']) => {
     switch (status) {
         case 'running':
             return 'Web search in progress...'
+        case 'timeout':
+            return 'Web search timed out'
         case 'complete':
             return 'Web search completed'
         case 'error':
@@ -1988,6 +1990,7 @@ const ChatPanel = ({
         voiceRequest: 'Yêu cầu voice',
         videoRequest: 'Yêu cầu video',
         webSearchRunning: 'Đang tìm trên web...',
+        webSearchTimeout: 'Web search quá thời gian',
         webSearchComplete: 'Đã tìm web xong',
         webSearchFailed: 'Web search thất bại',
         webSearchDisabled: 'Web search đang tắt',
@@ -2191,6 +2194,7 @@ const ChatPanel = ({
         voiceRequest: 'Voice request',
         videoRequest: 'Video request',
         webSearchRunning: 'Web search in progress...',
+        webSearchTimeout: 'Web search timed out',
         webSearchComplete: 'Web search completed',
         webSearchFailed: 'Web search failed',
         webSearchDisabled: 'Web search disabled',
@@ -2598,6 +2602,8 @@ const ChatPanel = ({
         switch (status) {
             case 'running':
                 return copy.webSearchRunning
+            case 'timeout':
+                return copy.webSearchTimeout
             case 'complete':
                 return copy.webSearchComplete
             case 'error':

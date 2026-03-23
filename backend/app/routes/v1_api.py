@@ -671,7 +671,16 @@ def _mask_key(key: str) -> str:
 def _serialize_web_search_meta(search_context: Optional[SearchContext], enabled: bool) -> Dict[str, Any]:
     if not search_context:
         return {"enabled": bool(enabled), "status": "disabled" if not enabled else "skipped"}
-    status = "complete" if search_context.has_results else ("skipped" if enabled else "disabled")
+
+    status_hint = str(getattr(search_context, "status_hint", "") or "").strip().lower()
+    if status_hint in {"complete", "timeout", "skipped", "disabled", "error"}:
+        status = status_hint
+    elif not enabled:
+        status = "disabled"
+    elif search_context.has_results or search_context.search_queries or int(search_context.total_search_time_ms or 0) > 0:
+        status = "complete"
+    else:
+        status = "skipped"
     payload: Dict[str, Any] = {
         "enabled": bool(enabled),
         "status": status,
@@ -5831,8 +5840,15 @@ async def v1_chat_completions(
                 try:
                     search_coordinator = await _get_search_coordinator()
                     search_timeout_seconds = max(
-                        3.0,
-                        float(getattr(settings, "web_search_timeout_seconds", 12.0) or 12.0) + 2.0,
+                        6.0,
+                        float(
+                            getattr(
+                                settings,
+                                "web_search_total_timeout_seconds",
+                                float(getattr(settings, "web_search_timeout_seconds", 12.0) or 12.0) + 8.0,
+                            )
+                            or 0.0
+                        ),
                     )
                     requested_search_mode = str(turn_search_policy.get("resolved_mode") or "auto")
                     deep_read_requested = bool(turn_search_policy.get("deep_read"))
@@ -5852,34 +5868,39 @@ async def v1_chat_completions(
                         turn_search_policy.get("complexity_score"),
                         turn_search_policy.get("reason_label"),
                     )
-                    try:
-                        _search_context = await asyncio.wait_for(
-                            search_coordinator.run(
-                                user_message=latest_user_text,
-                                force=True,
-                                max_results=search_max_results,
-                                deep_read=deep_read_requested,
-                                mode=requested_search_mode,
-                                deep_verify=deep_verify_requested,
-                            ),
-                            timeout=search_timeout_seconds,
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "Web search pipeline timed out request_id=%s timeout_seconds=%s",
-                            request_id,
-                            search_timeout_seconds,
-                        )
-                        _search_context = SearchContext(
-                            warnings=[
-                                "Web search timed out, so PigTex continued without live search evidence."
-                            ]
-                        )
+                    _search_context = await search_coordinator.run(
+                        user_message=latest_user_text,
+                        force=True,
+                        max_results=search_max_results,
+                        deep_read=deep_read_requested,
+                        mode=requested_search_mode,
+                        deep_verify=deep_verify_requested,
+                        total_timeout_seconds=search_timeout_seconds,
+                    )
+                    if _search_context.has_results:
+                        _msgs = _prepend_system_message(_msgs, _search_context.to_prompt_section())
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Web search pipeline timed out unexpectedly request_id=%s timeout_seconds=%s",
+                        request_id,
+                        search_timeout_seconds,
+                    )
+                    _search_context = SearchContext(
+                        status_hint="timeout",
+                        warnings=[
+                            "Web search hit the server time budget before sources were ready. PigTex continued with any evidence fetched so far."
+                        ],
+                    )
                     if _search_context.has_results:
                         _msgs = _prepend_system_message(_msgs, _search_context.to_prompt_section())
                 except Exception as e:
                     logger.warning("Web search pipeline failed request_id=%s error=%s", request_id, e)
-                    _search_context = SearchContext()
+                    _search_context = SearchContext(
+                        status_hint="error",
+                        warnings=[
+                            "Web search failed before live sources could be prepared. PigTex continued without live search evidence."
+                        ],
+                    )
 
             runtime_block = build_runtime_instruction_block(request.runtime_instruction or "")
             if runtime_block:

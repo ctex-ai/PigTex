@@ -2,7 +2,7 @@ import asyncio
 import unittest
 
 from app.config import Settings
-from app.search.models import SearchIntent, SearchMode, SearchResult
+from app.search.models import SearchIntent, SearchMode, SearchQuery, SearchResult
 from app.search.providers.broker import SearchBroker
 from app.search.search_coordinator import SearchCoordinator
 
@@ -44,6 +44,7 @@ class SearchCoordinatorTests(unittest.TestCase):
                 force=True,
                 mode="realtime",
             )
+            self.assertEqual(context.status_hint, "complete")
             self.assertEqual(context.raw_results_count, 0)
             self.assertIn("Web search did not return any usable source results.", context.warnings)
 
@@ -65,8 +66,61 @@ class SearchCoordinatorTests(unittest.TestCase):
                 force=True,
                 mode="realtime",
             )
+            self.assertEqual(context.status_hint, "timeout")
             self.assertEqual(context.raw_results_count, 0)
             self.assertTrue(any("timed out" in warning.lower() for warning in context.warnings))
+
+        asyncio.run(scenario())
+
+    def test_run_keeps_partial_results_when_total_time_budget_expires(self) -> None:
+        coordinator = SearchCoordinator(
+            Settings(
+                redis_url="",
+                web_search_tavily_api_key="test-key",
+                web_search_duckduckgo_enabled=False,
+            )
+        )
+
+        async def fake_search_query(query: SearchQuery, max_results: int = 5):
+            if "latest update" in query.query:
+                await asyncio.sleep(0.2)
+                return [
+                    SearchResult(
+                        title="Slow source",
+                        url="https://example.com/slow",
+                        snippet="This result arrived too late.",
+                    )
+                ]
+            await asyncio.sleep(0.01)
+            return [
+                SearchResult(
+                    title="Fast source",
+                    url="https://example.com/fast",
+                    snippet="Gold traded at 2,351 USD/oz on 2026-03-23.",
+                    relevance_score=0.8,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                )
+            ]
+
+        coordinator._plan_queries = lambda *args, **kwargs: [  # type: ignore[assignment]
+            SearchQuery(query="OpenAI latest news today", topic="news", priority=1),
+            SearchQuery(query="OpenAI latest news today latest update", topic="news", priority=2),
+        ]
+        coordinator._search_query = fake_search_query  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="OpenAI latest news today",
+                force=True,
+                mode="realtime",
+                total_timeout_seconds=0.05,
+            )
+            self.assertEqual(context.status_hint, "timeout")
+            self.assertGreaterEqual(context.raw_results_count, 1)
+            self.assertTrue(any(citation["url"] == "https://example.com/fast" for citation in context.citations))
+            self.assertFalse(any(citation["url"] == "https://example.com/slow" for citation in context.citations))
+            self.assertTrue(any("time budget" in warning.lower() or "timed out" in warning.lower() for warning in context.warnings))
 
         asyncio.run(scenario())
 

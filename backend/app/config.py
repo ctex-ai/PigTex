@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     web_search_browser_max_content_chars: int = 20000
     web_search_browser_min_content_chars: int = 1200
     web_search_timeout_seconds: float = 15.0
+    web_search_total_timeout_seconds: float = 24.0
     web_search_max_results: int = 8
     web_search_url_read_max_snippet_chars: int = 8000
     web_search_cache_ttl_seconds: int = 600

@@ -1487,6 +1487,8 @@ function extractWebSearchMetadataFromPayload(payload: JsonRecord): WebSearchMeta
     const normalizedStatus: WebSearchMetadata['status'] =
         statusRaw === 'running'
             ? 'running'
+            : statusRaw === 'timeout'
+                ? 'timeout'
             : statusRaw === 'complete'
                 ? 'complete'
                 : statusRaw === 'disabled'
@@ -3731,7 +3733,7 @@ export interface WebSearchClaimVerification {
 
 export interface WebSearchMetadata {
     enabled: boolean;
-    status: 'running' | 'complete' | 'skipped' | 'disabled' | 'error';
+    status: 'running' | 'complete' | 'timeout' | 'skipped' | 'disabled' | 'error';
     mode?: 'auto' | 'fast' | 'deep';
     search_intent?: string;
     search_queries?: string[];

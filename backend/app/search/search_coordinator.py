@@ -408,8 +408,14 @@ class SearchCoordinator:
         mode: str = "auto",
         deep_verify: bool = False,
         max_claims: int | None = None,
+        total_timeout_seconds: float | None = None,
     ) -> SearchContext:
         started_at = perf_counter()
+        deadline = (
+            started_at + max(0.05, float(total_timeout_seconds))
+            if total_timeout_seconds is not None
+            else None
+        )
         text = (user_message or "").strip()
         intent = self._detect_intent(text)
         resolved_mode = self._resolve_mode(mode, intent, deep_read=deep_read, deep_verify=deep_verify)
@@ -418,6 +424,7 @@ class SearchCoordinator:
             search_intent=intent,
             mode=resolved_mode,
             checked_at_utc=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            status_hint="skipped",
         )
 
         if not text:
@@ -454,8 +461,14 @@ class SearchCoordinator:
         urls = self._extract_urls(text)
         if urls:
             context.mode = SearchMode.URL_READ
+            context.status_hint = "complete"
             context.search_queries = urls
-            url_results = await self._run_url_reads(urls)
+            url_results, url_reads_timed_out = await self._run_url_reads(urls, deadline=deadline)
+            if url_reads_timed_out:
+                self._mark_timeout(
+                    context,
+                    "PigTex ran out of time while reading the requested URL(s). It kept any pages fetched so far.",
+                )
             ranked_url_results = enrich_and_rank_results(
                 url_results,
                 mode=SearchMode.URL_READ,
@@ -485,6 +498,7 @@ class SearchCoordinator:
 
         if not self.search_broker.is_enabled:
             logger.info("Web search skipped: no search provider is configured")
+            context.status_hint = "disabled"
             context.warnings.append("Web search provider is not configured on server.")
             context.total_search_time_ms = int((perf_counter() - started_at) * 1000)
             return context
@@ -514,13 +528,13 @@ class SearchCoordinator:
             context.total_search_time_ms = int((perf_counter() - started_at) * 1000)
             return context
 
+        context.status_hint = "complete"
         context.search_queries = [query.query for query in planned_queries]
-
-        query_tasks = [
-            asyncio.create_task(self._search_query(query, max_results=limit))
-            for query in planned_queries
-        ]
-        task_outputs = await asyncio.gather(*query_tasks, return_exceptions=True)
+        task_outputs, search_phase_timed_out = await self._run_planned_queries(
+            planned_queries,
+            max_results=limit,
+            deadline=deadline,
+        )
 
         all_results: List[SearchResult] = []
         timeout_warning_added = False
@@ -531,9 +545,16 @@ class SearchCoordinator:
                         "Web search timed out before all live sources were fetched. PigTex continued with partial or empty results."
                     )
                     timeout_warning_added = True
+                    context.status_hint = "timeout"
                 logger.warning("Search query failed query=%s error=%s", query.query, output)
                 continue
             all_results.extend(output)
+
+        if search_phase_timed_out and not timeout_warning_added:
+            self._mark_timeout(
+                context,
+                "Web search reached its time budget. PigTex kept the sources it had already fetched.",
+            )
 
         deduped_results = self._dedupe_results(all_results)
         if planned_queries and not deduped_results:
@@ -546,7 +567,12 @@ class SearchCoordinator:
             or intent == SearchIntent.DEEP_RESEARCH
         )
         if should_deep_read and deduped_results:
-            await self._deep_read_top_results(deduped_results)
+            deep_read_timed_out = await self._deep_read_top_results(deduped_results, deadline=deadline)
+            if deep_read_timed_out:
+                self._mark_timeout(
+                    context,
+                    "PigTex ran out of time while opening full source pages. The answer may rely on source snippets.",
+                )
 
         ranked_results = enrich_and_rank_results(
             deduped_results,
@@ -1161,11 +1187,92 @@ class SearchCoordinator:
             self._recent_search_calls.append(now)
             return True
 
-    async def _run_url_reads(self, urls: List[str]) -> List[SearchResult]:
+    def _remaining_deadline_seconds(self, deadline: float | None) -> float | None:
+        if deadline is None:
+            return None
+        return max(0.0, deadline - perf_counter())
+
+    def _add_warning_once(self, context: SearchContext, warning: str) -> None:
+        normalized = warning.strip()
+        if normalized and normalized not in context.warnings:
+            context.warnings.append(normalized)
+
+    def _mark_timeout(self, context: SearchContext, warning: str) -> None:
+        context.status_hint = "timeout"
+        self._add_warning_once(context, warning)
+
+    async def _run_planned_queries(
+        self,
+        planned_queries: Sequence[SearchQuery],
+        *,
+        max_results: int,
+        deadline: float | None,
+    ) -> Tuple[List[object], bool]:
+        query_tasks = [
+            asyncio.create_task(self._search_query(query, max_results=max_results))
+            for query in planned_queries
+        ]
+        if not query_tasks:
+            return [], False
+
+        remaining = self._remaining_deadline_seconds(deadline)
+        if remaining is None:
+            outputs = await asyncio.gather(*query_tasks, return_exceptions=True)
+            return list(outputs), False
+
+        done, pending = await asyncio.wait(query_tasks, timeout=remaining)
+        results_by_task: Dict[asyncio.Task, object] = {}
+        for task in done:
+            try:
+                results_by_task[task] = task.result()
+            except Exception as exc:  # pragma: no cover - surfaced through returned outputs
+                results_by_task[task] = exc
+
+        if pending:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+        outputs: List[object] = []
+        for query, task in zip(planned_queries, query_tasks):
+            output = results_by_task.get(task)
+            if output is None:
+                output = SearchQueryTimeoutError(query.query)
+            outputs.append(output)
+
+        return outputs, bool(pending)
+
+    async def _run_url_reads(
+        self,
+        urls: List[str],
+        *,
+        deadline: float | None = None,
+    ) -> Tuple[List[SearchResult], bool]:
         tasks = [asyncio.create_task(self.read_url_content(url)) for url in urls[: self._max_deep_reads]]
         if not tasks:
-            return []
-        outputs = await asyncio.gather(*tasks, return_exceptions=True)
+            return [], False
+
+        timed_out = False
+        remaining = self._remaining_deadline_seconds(deadline)
+        if remaining is None:
+            outputs = await asyncio.gather(*tasks, return_exceptions=True)
+        else:
+            done, pending = await asyncio.wait(tasks, timeout=remaining)
+            outputs = []
+            for task in tasks:
+                if task in done:
+                    try:
+                        outputs.append(task.result())
+                    except Exception as exc:
+                        outputs.append(exc)
+                else:
+                    outputs.append(asyncio.TimeoutError())
+            if pending:
+                timed_out = True
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
         results: List[SearchResult] = []
         for output in outputs:
             if isinstance(output, Exception):
@@ -1173,13 +1280,13 @@ class SearchCoordinator:
                 continue
             if output:
                 results.append(output)
-        return results
+        return results, timed_out
 
-    async def _deep_read_top_results(self, results: List[SearchResult]) -> None:
+    async def _deep_read_top_results(self, results: List[SearchResult], *, deadline: float | None = None) -> bool:
         candidates = [result for result in results if (result.url and not result.full_content)]
         candidates = candidates[: self._max_deep_reads]
         if not candidates:
-            return
+            return False
 
         semaphore = asyncio.Semaphore(2)
 
@@ -1202,10 +1309,29 @@ class SearchCoordinator:
                 if enriched.published_at:
                     result.published_at = enriched.published_at
 
-        await asyncio.gather(
-            *[asyncio.create_task(_deep_read(result)) for result in candidates],
-            return_exceptions=True,
-        )
+        tasks = [asyncio.create_task(_deep_read(result)) for result in candidates]
+        remaining = self._remaining_deadline_seconds(deadline)
+        if remaining is None:
+            outputs = await asyncio.gather(*tasks, return_exceptions=True)
+            for output in outputs:
+                if isinstance(output, Exception):
+                    logger.warning("URL enrichment failed: %s", output)
+            return False
+
+        done, pending = await asyncio.wait(tasks, timeout=remaining)
+        for task in done:
+            try:
+                task.result()
+            except Exception as exc:
+                logger.warning("URL enrichment failed: %s", exc)
+
+        if not pending:
+            return False
+
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        return True
 
     def _dedupe_results(self, results: Iterable[SearchResult]) -> List[SearchResult]:
         by_url: Dict[str, SearchResult] = {}

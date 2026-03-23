@@ -3136,6 +3136,10 @@
     color: #0e8a3d;
 }
 
+.message-web-search-status-timeout {
+    color: #b45309;
+}
+
 .message-web-search-status-skipped,
 .message-web-search-status-disabled {
     color: #6b7280;

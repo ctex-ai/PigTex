@@ -4,7 +4,9 @@ from app.routes.v1_api import (
     V1ChatCompletionRequest,
     _derive_web_search_policy,
     _is_internal_tool_turn_text,
+    _serialize_web_search_meta,
 )
+from app.search.models import SearchContext, SearchIntent, SearchMode
 
 
 class V1WebSearchPolicyTests(unittest.TestCase):
@@ -49,6 +51,35 @@ class V1WebSearchPolicyTests(unittest.TestCase):
         self.assertGreaterEqual(policy["max_results"], 6)
         self.assertTrue(policy["price_intent"])
         self.assertIn("price", policy["reason_label"])
+
+    def test_serialize_web_search_meta_marks_timeout_explicitly(self) -> None:
+        payload = _serialize_web_search_meta(
+            SearchContext(
+                status_hint="timeout",
+                search_intent=SearchIntent.REALTIME_INFO,
+                mode=SearchMode.REALTIME,
+                search_queries=["gia vang hom nay"],
+                warnings=["Web search reached its time budget."],
+            ),
+            enabled=True,
+        )
+
+        self.assertEqual(payload["status"], "timeout")
+
+    def test_serialize_web_search_meta_keeps_executed_empty_search_complete(self) -> None:
+        payload = _serialize_web_search_meta(
+            SearchContext(
+                status_hint="complete",
+                search_intent=SearchIntent.REALTIME_INFO,
+                mode=SearchMode.REALTIME,
+                search_queries=["gia vang hom nay"],
+                total_search_time_ms=920,
+                warnings=["Web search did not return any usable source results."],
+            ),
+            enabled=True,
+        )
+
+        self.assertEqual(payload["status"], "complete")
 
 
 if __name__ == "__main__":

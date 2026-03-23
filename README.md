@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Electron + React renderer, FastAPI backend, GitHub Releases auto-update, and a public repository curated specifically for desktop contributors.
+  Electron + React renderer, FastAPI backend, website-served desktop updates, and a public repository curated specifically for desktop contributors.
 </p>
 
 <p align="center">
@@ -66,7 +66,7 @@
     </td>
     <td width="33%" valign="top">
       <strong>Desktop-native release flow</strong><br />
-      Windows packaging, release staging, GitHub Releases publishing, and in-app auto-update are part of the public tree.
+      Windows packaging, release staging, and production-safe desktop delivery are part of the public tree.
     </td>
   </tr>
   <tr>
@@ -122,7 +122,7 @@ flowchart LR
     IPC --> API[FastAPI Backend]
     API --> LOCAL[Local storage and workspace state]
     API --> CLOUD[Opt-in cloud backup and sync]
-    IPC --> UPDATE[GitHub Releases auto-update]
+    IPC --> UPDATE[Website-served desktop updates]
     IPC --> SECURE[OS secure credential storage]
 ```
 
@@ -169,13 +169,11 @@ Then run:
 ```powershell
 npm run build:win:release
 npm run release:stage
-npm run release:publish
 ```
 
 - `build:win:release` creates the stable Windows installer in `/release`
-- `release:stage` copies the stable `.exe`, matching `.blockmap`, and `latest.yml` into `/release-staged`
-- `release:publish` uploads the staged assets to the versioned GitHub Release
-- Stable packaged builds check GitHub Releases for updates and can install newer Windows versions in-app
+- `release:stage` stages the stable `.exe` and matching `.blockmap` for the production download host
+- Stable packaged builds check the hosted desktop manifest and open the website download flow when a newer installer is available
 
 ## Repository Layout
 

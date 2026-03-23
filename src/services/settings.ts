@@ -125,11 +125,11 @@ const FALLBACK_API_PROVIDER_CATALOG: ApiProviderCatalogEntry[] = [
         kind: 'gateway',
         upstream_mode: 'openai',
         request_api_provider: 'openai',
-        default_base_url: '',
+        default_base_url: 'https://api.texapi.dev/v1/partner/gateway',
         docs_url: '',
         auth_style: 'bearer',
-        supports_byok: true,
-        managed_by_server: false,
+        supports_byok: false,
+        managed_by_server: true,
         aliases: ['texapi', 'tex-api'],
     },
     {
@@ -347,7 +347,7 @@ function buildDefaultProviderCredentialProfiles(): ProviderCredentialProfiles {
     return {
         auto: {
             apiKey: '',
-            baseUrl: '',
+            baseUrl: getPublicProviderDefaultBaseUrl('texapi'),
         },
         openai: {
             apiKey: '',
@@ -373,7 +373,7 @@ export const DEFAULT_PIGTEX_SETTINGS: PigTexSettings = {
     apiProvider: DEFAULT_PROVIDER,
     customEndpoint: 'openai',
     apiKey: '',
-    baseUrl: '',
+    baseUrl: getPublicProviderDefaultBaseUrl('texapi'),
     providerCredentialProfiles: buildDefaultProviderCredentialProfiles(),
     model: 'gpt-4o',
     memoryEnabled: true,
@@ -688,7 +688,7 @@ function resolveBaseUrlForProvider(
     }
 
     void customEndpoint
-    return normalizeCustomBaseUrl(rawBaseUrl)
+    return normalizeCustomBaseUrl(rawBaseUrl) || getPublicProviderDefaultBaseUrl('texapi')
 }
 
 // ===== Migration from v1 =====

@@ -142,11 +142,11 @@ describe('AdminConsole', () => {
         render(<AdminConsole />)
 
         await waitFor(() => expect(screen.getByText('Admin Console')).toBeInTheDocument())
-        expect(screen.queryByText('Check prompt routing')).not.toBeInTheDocument()
+        expect(screen.queryByText('Check skill routing')).not.toBeInTheDocument()
 
         fireEvent.click(screen.getAllByRole('button', { name: 'Show technical details' })[0])
 
-        expect(screen.getByText('Check prompt routing')).toBeInTheDocument()
+        expect(screen.getByText('Check skill routing')).toBeInTheDocument()
     })
 
     it('shows translated publish gate labels in Vietnamese and keeps raw codes in advanced mode', async () => {

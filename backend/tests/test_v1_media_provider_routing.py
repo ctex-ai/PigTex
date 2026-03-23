@@ -110,6 +110,38 @@ class V1MediaProviderRoutingTests(unittest.TestCase):
         self.assertEqual(models_by_id["acme-r2v-seedream-sora"]["type"], "video")
         self.assertIn("video_generation", models_by_id["acme-r2v-seedream-sora"]["capabilities"])
 
+    def test_normalize_upstream_models_payload_preserves_provider_flags(self) -> None:
+        payload = {
+            "data": [
+                {
+                    "id": "acme-best-model",
+                    "owned_by": "gateway",
+                    "recommendation_flag": {
+                        "label": "Best",
+                        "tone": "accent",
+                    },
+                    "status_flag": {
+                        "label": "Stopped",
+                        "tone": "danger",
+                        "disabled": True,
+                    },
+                }
+            ]
+        }
+
+        normalized = v1_api._normalize_upstream_models_payload("openai", payload)
+        model = normalized["data"][0]
+
+        self.assertEqual(model["recommendation_flag"], {
+            "label": "Best",
+            "tone": "accent",
+        })
+        self.assertEqual(model["status_flag"], {
+            "label": "Stopped",
+            "tone": "danger",
+            "disabled": True,
+        })
+
     def test_chat_completions_requires_explicit_model(self) -> None:
         cfg = v1_api.ResolvedUpstreamConfig(
             api_key="sk-openai-test",

@@ -296,7 +296,7 @@ const MODEL_PLACEHOLDER_BY_PROVIDER: Record<ApiEndpointProviderId, string> = {
 }
 
 const createEmptyCredentialProfiles = (): PigTexSettings['providerCredentialProfiles'] => ({
-    auto: { apiKey: '', baseUrl: '' },
+    auto: { apiKey: '', baseUrl: getProviderDefaultBaseUrl('auto') },
     openai: { apiKey: '', baseUrl: getProviderDefaultBaseUrl('openai') },
     anthropic: { apiKey: '', baseUrl: getProviderDefaultBaseUrl('anthropic') },
     gemini: { apiKey: '', baseUrl: getProviderDefaultBaseUrl('gemini') },
@@ -446,6 +446,14 @@ const SettingsModal = ({
         signOutDescription: 'Kết thúc phiên PigTex hiện tại trên thiết bị này',
         signOutHint: 'Bạn có thể đăng nhập lại bất cứ lúc nào bằng email hoặc OAuth.',
         signedOut: 'Đã đăng xuất',
+        resetLocalData: 'Xóa toàn bộ data trên máy',
+        resetLocalDataDescription: 'Xóa toàn bộ dữ liệu PigTex trên thiết bị này để app trở về trạng thái mới tinh',
+        resetLocalDataWarning: 'Thao tác này xóa settings, phiên đăng nhập, cache, secure key và dữ liệu local của PigTex trên máy này.',
+        resetLocalDataServerNote: 'Không xóa tài khoản PigTex, subscription hay dữ liệu cloud/server.',
+        resetLocalDataConfirm: 'Xóa toàn bộ dữ liệu PigTex trên máy này? Ứng dụng sẽ tải lại về trạng thái mới tinh.',
+        resetLocalDataSuccess: 'Đã xóa toàn bộ dữ liệu local của PigTex. Ứng dụng sẽ tải lại.',
+        resetLocalDataFailed: 'Không thể xóa toàn bộ dữ liệu local của PigTex',
+        resettingLocalData: 'Đang xóa dữ liệu...',
         currentDevice: 'Thiết bị hiện tại',
         loadingDeviceInfo: 'Đang tải thông tin thiết bị',
         currentDeviceDescription: 'Phiên PigTex đang mở trên máy này',
@@ -625,6 +633,14 @@ const SettingsModal = ({
         signOutDescription: 'End the current PigTex session on this device',
         signOutHint: 'You can sign back in any time with email or OAuth.',
         signedOut: 'Signed out',
+        resetLocalData: 'Wipe all local data',
+        resetLocalDataDescription: 'Remove all PigTex data on this device and return the app to a clean first-run state',
+        resetLocalDataWarning: 'This removes PigTex settings, sign-in session, cache, secure keys, and local data from this device.',
+        resetLocalDataServerNote: 'It does not delete your PigTex account, subscription, or cloud/server data.',
+        resetLocalDataConfirm: 'Delete all PigTex data on this device? The app will reload into a clean state.',
+        resetLocalDataSuccess: 'All PigTex local data was removed. The app will reload.',
+        resetLocalDataFailed: 'Failed to wipe PigTex local data',
+        resettingLocalData: 'Clearing data...',
         currentDevice: 'Current device',
         loadingDeviceInfo: 'Loading device information',
         currentDeviceDescription: 'This is the PigTex session currently running on this machine',
@@ -773,40 +789,40 @@ const SettingsModal = ({
     }
     const updateCopy = previewIsVietnamese ? {
         title: 'Cập nhật desktop',
-        description: 'PigTex kiểm tra GitHub Releases, tải bản mới và cài ngay trong app khi có thể.',
+        description: 'PigTex kiểm tra bản mới và mở website cập nhật để bạn tải installer mới nhất.',
         availableTitle: (version: string) => `Có PigTex ${version} mới`,
-        availableDescription: 'Bấm Cập nhật ngay để PigTex tải và cài bản mới. Nếu cài tự động không sẵn sàng, app sẽ mở GitHub Release.',
+        availableDescription: 'Bấm Cập nhật ngay để mở website, tải installer và chọn cách cài đặt.',
         upToDateTitle: 'Bạn đang dùng bản mới nhất',
         upToDateDescription: 'Khi có bản mới, PigTex sẽ hiện badge Update ở footer sidebar.',
         failedTitle: 'Không kiểm tra được bản cập nhật',
-        failedDescription: 'Kiểm tra lại mạng, GitHub Releases, hoặc endpoint manifest fallback.',
+        failedDescription: 'Kiểm tra lại mạng hoặc endpoint manifest update.',
         status: 'Trạng thái',
         latestVersion: 'Bản mới nhất',
         lastChecked: 'Kiểm tra lần cuối',
         checkNow: 'Kiểm tra ngay',
         checking: 'Đang kiểm tra...',
-        installNow: 'Tải và cài đặt',
-        installing: 'Đang tải bản cập nhật...',
-        openWebsite: 'Mở GitHub Release',
-        updateHint: 'Nếu auto-update không chạy được trên máy này, PigTex sẽ mở GitHub Release để bạn cài thủ công.'
+        installNow: 'Cập nhật ngay',
+        installing: 'Đang mở website...',
+        openWebsite: 'Mở website cập nhật',
+        updateHint: 'Trong setup sẽ có lựa chọn: gỡ bản cũ rồi cài mới, hoặc giữ bản cũ và cài song song.'
     } : {
         title: 'Desktop updates',
-        description: 'PigTex checks GitHub Releases and installs newer desktop builds in-app when possible.',
+        description: 'PigTex checks for new releases and opens the update website so you can download the latest installer.',
         availableTitle: (version: string) => `PigTex ${version} is available`,
-        availableDescription: 'Click Install update so PigTex can download and install the new build. If automatic install is unavailable, the app will open the GitHub release page.',
+        availableDescription: 'Click Install update to open the website, download the installer, and choose install mode.',
         upToDateTitle: 'You are already on the latest version',
         upToDateDescription: 'When a newer build is published, PigTex will show an Update badge in the sidebar footer.',
         failedTitle: 'Unable to check for updates',
-        failedDescription: 'Check your network connection, GitHub Releases, or the fallback update manifest endpoint.',
+        failedDescription: 'Check your network connection or the update manifest endpoint.',
         status: 'Status',
         latestVersion: 'Latest version',
         lastChecked: 'Last checked',
         checkNow: 'Check now',
         checking: 'Checking...',
-        installNow: 'Download and install',
-        installing: 'Downloading update...',
-        openWebsite: 'Open GitHub release',
-        updateHint: 'If automatic installation is unavailable on this machine, PigTex will open the GitHub release page for manual install.'
+        installNow: 'Install update',
+        installing: 'Opening website...',
+        openWebsite: 'Open update website',
+        updateHint: 'Setup now offers a choice: uninstall old version first, or keep old version and install side-by-side.'
     }
     const [activeTab, setActiveTab] = useState<SettingsTabId>('connection')
     const [showApiKey, setShowApiKey] = useState(false)
@@ -831,6 +847,7 @@ const SettingsModal = ({
     })
     const [isChangingPassword, setIsChangingPassword] = useState(false)
     const [isDeletingAccount, setIsDeletingAccount] = useState(false)
+    const [isResettingLocalData, setIsResettingLocalData] = useState(false)
     const [cloudDeviceId, setCloudDeviceId] = useState<string | null>(null)
     const [cloudQuota, setCloudQuota] = useState<CloudQuota | null>(null)
     const [cloudUsage, setCloudUsage] = useState<CloudUsageSummary | null>(null)
@@ -901,7 +918,9 @@ const SettingsModal = ({
     const effectiveProvider = resolveApiProviderForRequest(draft.apiProvider, draft.customEndpoint)
     const currentProviderConfig = providerCatalog.find((provider) => provider.id === selectedPublicProviderId)
         || getApiProviderCatalogEntryForSelection(draft.apiProvider, draft.customEndpoint)
-    const isBaseUrlLocked = draft.apiProvider !== 'auto'
+    const providerManagedByServer = Boolean(currentProviderConfig.managed_by_server)
+    const providerAcceptsClientCredentials = currentProviderConfig.supports_byok && !providerManagedByServer
+    const isBaseUrlLocked = draft.apiProvider !== 'auto' || providerManagedByServer
     const modelPlaceholder = MODEL_PLACEHOLDER_BY_PROVIDER[effectiveProvider]
     const hasPassword = hasPasswordOverride ?? (user?.has_password ?? true)
     const accountProviderLabel = formatProviderLabel(user?.oauth_provider, previewIsVietnamese)
@@ -970,11 +989,14 @@ const SettingsModal = ({
             const nextProvider = nextSelection.apiProvider
             const nextCustomEndpoint = nextSelection.customEndpoint
             const nextProfile = profiles[nextProvider]
-            const nextApiKey = providerCfg.supports_byok ? (nextProfile?.apiKey || '') : ''
-            const nextBaseUrl = normalizeProfileBaseUrl(
-                nextProvider,
-                providerCfg.default_base_url || nextProfile?.baseUrl || ''
-            )
+            const acceptsClientCredentials = providerCfg.supports_byok && !providerCfg.managed_by_server
+            const nextApiKey = acceptsClientCredentials ? (nextProfile?.apiKey || '') : ''
+            const nextBaseUrl = providerCfg.managed_by_server
+                ? (providerCfg.default_base_url || '')
+                : normalizeProfileBaseUrl(
+                    nextProvider,
+                    providerCfg.default_base_url || nextProfile?.baseUrl || ''
+                )
 
             profiles[nextProvider] = {
                 apiKey: nextApiKey,
@@ -1005,7 +1027,7 @@ const SettingsModal = ({
             setIsLoadingModels(true)
             setModelsError(null)
 
-            const modelRequest = currentProviderConfig.supports_byok
+            const modelRequest = providerAcceptsClientCredentials
                 ? (() => {
                     const apiKey = draft.apiKey.trim()
                     const baseUrl = normalizeBaseUrlInput(draft.baseUrl)
@@ -1055,7 +1077,7 @@ const SettingsModal = ({
     }, [
         copy.modelLoadBaseUrlHint,
         copy.modelLoadFailed,
-        currentProviderConfig.supports_byok,
+        providerAcceptsClientCredentials,
         draft.apiKey,
         draft.baseUrl,
         draft.apiProvider,
@@ -1113,6 +1135,22 @@ const SettingsModal = ({
         return serializeForCompare(draft) !== serializeForCompare(settings)
     }, [draft, settings])
 
+    const clearBrowserLocalData = () => {
+        if (typeof window === 'undefined') return
+
+        try {
+            window.sessionStorage.clear()
+        } catch {
+            // Ignore browser storage cleanup failures; Electron still clears desktop storage below.
+        }
+
+        try {
+            window.localStorage.clear()
+        } catch {
+            // Ignore browser storage cleanup failures; Electron still clears desktop storage below.
+        }
+    }
+
     const handleSave = () => {
         const hasApiKey = Boolean(normalizedDraft.apiKey.trim())
         const requiresBaseUrl = hasApiKey
@@ -1157,7 +1195,7 @@ const SettingsModal = ({
     }
 
     const handleTestConnection = async () => {
-        if (!currentProviderConfig.supports_byok) {
+        if (!providerAcceptsClientCredentials) {
             showInfo(copy.providerManagedTestHint)
             return
         }
@@ -1245,6 +1283,27 @@ const SettingsModal = ({
         onClose()
         logout()
         showSuccess(copy.signedOut)
+    }
+
+    const handleResetLocalData = async () => {
+        const confirmed = window.confirm(copy.resetLocalDataConfirm)
+        if (!confirmed) return
+
+        setIsResettingLocalData(true)
+        try {
+            await window.electronAPI?.resetLocalData?.()
+            clearBrowserLocalData()
+            onClose()
+            showSuccess(copy.resetLocalDataSuccess)
+            window.setTimeout(() => {
+                window.location.reload()
+            }, 150)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : copy.resetLocalDataFailed
+            showError(message)
+        } finally {
+            setIsResettingLocalData(false)
+        }
     }
 
     const handleDeleteAccount = async () => {
@@ -2281,6 +2340,30 @@ const SettingsModal = ({
                                                     <span className="stg-hint">{copy.cannotUndo}</span>
                                                 </div>
                                             </SettingsSection>
+
+                                            <SettingsSection
+                                                icon={HardDrive}
+                                                title={copy.resetLocalData}
+                                                description={copy.resetLocalDataDescription}
+                                            >
+                                                <div className="stg-danger-note">
+                                                    {copy.resetLocalDataWarning}
+                                                </div>
+                                                <div className="stg-inline-note">
+                                                    {copy.resetLocalDataServerNote}
+                                                </div>
+                                                <div className="stg-action-row">
+                                                    <button
+                                                        type="button"
+                                                        className="stg-btn stg-btn--danger"
+                                                        onClick={handleResetLocalData}
+                                                        disabled={isResettingLocalData}
+                                                    >
+                                                        {isResettingLocalData ? copy.resettingLocalData : copy.resetLocalData}
+                                                    </button>
+                                                    <span className="stg-hint">{copy.cannotUndo}</span>
+                                                </div>
+                                            </SettingsSection>
                                         </motion.div>
                                     )}
 
@@ -2339,6 +2422,7 @@ const SettingsModal = ({
                                                             type={showApiKey ? 'text' : 'password'}
                                                             value={draft.apiKey}
                                                             onChange={(e) => setDraft(prev => {
+                                                                if (providerManagedByServer) return prev
                                                                 const nextApiKey = e.target.value
                                                                 const profiles = ensureCredentialProfiles(prev.providerCredentialProfiles)
                                                                 profiles[prev.apiProvider] = {
@@ -2351,7 +2435,8 @@ const SettingsModal = ({
                                                                     providerCredentialProfiles: profiles,
                                                                 }
                                                             })}
-                                                            placeholder={copy.getKey}
+                                                            placeholder={providerManagedByServer ? copy.providerManagedConnectionHint : copy.getKey}
+                                                            disabled={providerManagedByServer}
                                                             className="stg-input"
                                                         />
                                                         <button
@@ -2359,10 +2444,14 @@ const SettingsModal = ({
                                                             className="stg-secret-btn"
                                                             onClick={() => setShowApiKey(prev => !prev)}
                                                             title={showApiKey ? copy.hideSecret : copy.showSecret}
+                                                            disabled={providerManagedByServer}
                                                         >
                                                             {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
                                                         </button>
                                                     </div>
+                                                    {providerManagedByServer ? (
+                                                        <span className="stg-hint">{copy.providerManagedConnectionHint}</span>
+                                                    ) : null}
                                                 </div>
 
                                                 {/* Base URL */}

@@ -163,6 +163,34 @@ class SearchCoordinatorTests(unittest.TestCase):
 
         self.assertEqual(domains[0], "reddit.com")
 
+    def test_infer_preferred_domains_prefers_market_domains_for_gold_price_queries(self) -> None:
+        coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
+
+        domains = coordinator._infer_preferred_domains(
+            "Giá vàng hôm nay bao nhiêu?",
+            intent=SearchIntent.REALTIME_INFO,
+            needs_official_sources=False,
+            official_domains=[],
+        )
+
+        self.assertIn("pnj.com.vn", domains[:3])
+        self.assertIn("sjc.com.vn", domains[:3])
+        self.assertIn("vn.investing.com", domains)
+
+    def test_infer_preferred_domains_prefers_market_domains_for_bitcoin_price_queries(self) -> None:
+        coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
+
+        domains = coordinator._infer_preferred_domains(
+            "Giá bitcoin hôm nay bao nhiêu?",
+            intent=SearchIntent.REALTIME_INFO,
+            needs_official_sources=False,
+            official_domains=[],
+        )
+
+        self.assertIn("coingecko.com", domains[:3])
+        self.assertIn("coinmarketcap.com", domains[:4])
+        self.assertIn("binance.com", domains[:5])
+
     def test_provider_chain_prefers_tavily_before_ddg(self) -> None:
         coordinator = SearchCoordinator(
             Settings(
@@ -199,13 +227,279 @@ class SearchCoordinatorTests(unittest.TestCase):
             "Giá vàng hôm nay bao nhiêu?",
             intent=SearchIntent.REALTIME_INFO,
             mode=SearchMode.REALTIME,
-            preferred_domains=[],
+            preferred_domains=["pnj.com.vn", "sjc.com.vn", "vn.investing.com"],
             needs_official_sources=False,
         )
 
         self.assertEqual(queries[0].topic, "general")
-        self.assertTrue(any(item.topic == "news" for item in queries))
-        self.assertTrue(any("cập nhật giá" in item.query for item in queries))
+        self.assertFalse(any("cập nhật giá" in item.query for item in queries))
+        self.assertTrue(any("XAU/USD" in item.query for item in queries))
+        self.assertTrue(any("site:pnj.com.vn" in item.query for item in queries))
+
+    def test_bitcoin_price_queries_add_direct_market_symbol_query(self) -> None:
+        coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
+
+        queries = coordinator._plan_queries(
+            "Giá bitcoin hôm nay bao nhiêu?",
+            intent=SearchIntent.REALTIME_INFO,
+            mode=SearchMode.REALTIME,
+            preferred_domains=["coingecko.com", "coinmarketcap.com", "binance.com"],
+            needs_official_sources=False,
+        )
+
+        self.assertTrue(any("BTC/USD" in item.query for item in queries))
+        self.assertTrue(any("site:coingecko.com" in item.query for item in queries))
+
+    def test_gold_price_query_filters_irrelevant_fuel_results(self) -> None:
+        coordinator = SearchCoordinator(Settings(web_search_tavily_api_key="test-key", redis_url=""))
+
+        async def fake_search(*args, **kwargs):
+            return [
+                SearchResult(
+                    title="Gas prices jump as oil spikes",
+                    url="https://example.com/gas",
+                    snippet="Gas prices and crude oil moved sharply higher today.",
+                    relevance_score=0.98,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+                SearchResult(
+                    title="Giá vàng hôm nay 23/3/2026 tăng mạnh",
+                    url="https://example.com/news/gia-vang-hom-nay-23-3-2026.html",
+                    snippet="Bài báo tổng hợp diễn biến giá vàng trong ngày.",
+                    relevance_score=0.9,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+                SearchResult(
+                    title="Giá vàng hôm nay sáng 23/3/2026 - YouTube",
+                    url="https://www.youtube.com/watch?v=demo",
+                    snippet="Video cập nhật giá vàng hôm nay.",
+                    relevance_score=0.93,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+                SearchResult(
+                    title="Bảng giá vàng PNJ hôm nay",
+                    url="https://pnj.com.vn/gia-vang",
+                    snippet="Giá vàng 24K PNJ mua vào 7,70 triệu/chỉ, bán ra 7,84 triệu/chỉ.",
+                    relevance_score=0.42,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+                SearchResult(
+                    title="XAU USD | Tỷ giá vàng hôm nay",
+                    url="https://vn.investing.com/currencies/xau-usd",
+                    snippet="XAU/USD giao dịch quanh 4.140 USD/ounce trong phiên hôm nay.",
+                    relevance_score=0.45,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+                SearchResult(
+                    title="Giá vàng hôm nay",
+                    url="https://24h.com.vn/gia-vang-hom-nay-c425.html",
+                    snippet="Giá vàng hôm nay được cập nhật theo thị trường trong nước.",
+                    relevance_score=0.87,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+            ]
+
+        async def fake_deep_read(*args, **kwargs):
+            return False
+
+        coordinator.search_broker.search = fake_search  # type: ignore[assignment]
+        coordinator._deep_read_top_results = fake_deep_read  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="Giá vàng hôm nay bao nhiêu?",
+                force=True,
+                mode="fast",
+                total_timeout_seconds=0.5,
+            )
+            urls = {citation["url"] for citation in context.citations}
+            self.assertNotIn("https://example.com/gas", urls)
+            self.assertNotIn("https://example.com/news/gia-vang-hom-nay-23-3-2026.html", urls)
+            self.assertNotIn("https://www.youtube.com/watch?v=demo", urls)
+            self.assertNotIn("https://24h.com.vn/gia-vang-hom-nay-c425.html", urls)
+            self.assertIn("https://pnj.com.vn/gia-vang", urls)
+            self.assertIn("https://vn.investing.com/currencies/xau-usd", urls)
+            self.assertTrue(any("off-topic" in warning for warning in context.warnings))
+            self.assertTrue(any("low-value price" in warning for warning in context.warnings))
+            self.assertEqual(context.citations[0]["domain"], "pnj.com.vn")
+            self.assertIn(context.citations[0]["result_type"], {"quote_page", "listing_page"})
+            self.assertGreater(context.citations[0]["evidence_quality_score"], 0.6)
+
+        asyncio.run(scenario())
+
+    def test_price_query_warns_when_direct_numeric_evidence_is_insufficient(self) -> None:
+        coordinator = SearchCoordinator(Settings(web_search_tavily_api_key="test-key", redis_url=""))
+
+        async def fake_search(*args, **kwargs):
+            return [
+                SearchResult(
+                    title="Bitcoin investors await Fed decision",
+                    url="https://example.com/news/bitcoin-investors-await-fed-decision",
+                    snippet="Analysts discussed whether bitcoin could move higher if rates are cut.",
+                    relevance_score=0.84,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+                SearchResult(
+                    title="Crypto market morning roundup",
+                    url="https://example.com/news/crypto-market-morning-roundup",
+                    snippet="The report summarized sentiment without quoting a live BTC/USD number.",
+                    relevance_score=0.8,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+            ]
+
+        async def fake_deep_read(*args, **kwargs):
+            return False
+
+        coordinator.search_broker.search = fake_search  # type: ignore[assignment]
+        coordinator._deep_read_top_results = fake_deep_read  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="Gia bitcoin hom nay bao nhieu?",
+                force=True,
+                mode="fast",
+                total_timeout_seconds=0.5,
+            )
+            self.assertTrue(any("did not produce enough direct numeric evidence" in warning for warning in context.warnings))
+            self.assertTrue(any("Do not answer with a specific current number" in item for item in context.answer_guidance))
+            self.assertLessEqual(context.confidence_score, 0.42)
+
+        asyncio.run(scenario())
+
+    def test_price_query_warns_when_only_one_domain_family_has_direct_numeric_evidence(self) -> None:
+        coordinator = SearchCoordinator(Settings(web_search_tavily_api_key="test-key", redis_url=""))
+
+        async def fake_search(*args, **kwargs):
+            return [
+                SearchResult(
+                    title="Bảng giá vàng PNJ hôm nay",
+                    url="https://pnj.com.vn/site/gia-vang",
+                    snippet="Giá vàng 24K PNJ mua vào 7,70 triệu/chỉ, bán ra 7,84 triệu/chỉ.",
+                    relevance_score=0.88,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+            ]
+
+        async def fake_deep_read(*args, **kwargs):
+            return False
+
+        coordinator.search_broker.search = fake_search  # type: ignore[assignment]
+        coordinator._deep_read_top_results = fake_deep_read  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="Giá vàng hôm nay bao nhiêu?",
+                force=True,
+                mode="fast",
+                total_timeout_seconds=0.5,
+            )
+            self.assertTrue(any("did not produce enough direct numeric evidence" in warning for warning in context.warnings))
+            self.assertLessEqual(context.confidence_score, 0.42)
+
+        asyncio.run(scenario())
+
+    def test_diversify_price_results_keeps_one_result_per_domain_family(self) -> None:
+        coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
+
+        results = [
+            SearchResult(
+                title="Bảng giá vàng PNJ hôm nay",
+                url="https://pnj.com.vn/site/gia-vang",
+                snippet="PNJ gold board.",
+                domain="pnj.com.vn",
+                result_type="quote_page",
+            ),
+            SearchResult(
+                title="Bảng giá vàng PNJ cache-busted",
+                url="https://pnj.com.vn/site/gia-vang?r=1728703561644",
+                snippet="PNJ gold board.",
+                domain="pnj.com.vn",
+                result_type="quote_page",
+            ),
+            SearchResult(
+                title="Giá vàng PNJ mirror",
+                url="https://giavang.pnj.com.vn/",
+                snippet="PNJ mirror.",
+                domain="giavang.pnj.com.vn",
+                result_type="listing_page",
+            ),
+            SearchResult(
+                title="XAU/USD",
+                url="https://vn.investing.com/currencies/xau-usd",
+                snippet="Gold quote.",
+                domain="vn.investing.com",
+                result_type="quote_page",
+            ),
+            SearchResult(
+                title="XAU/USD mirror",
+                url="https://investing.com/currencies/xau-usd",
+                snippet="Gold quote.",
+                domain="investing.com",
+                result_type="quote_page",
+            ),
+        ]
+
+        diversified = coordinator._diversify_price_results(results)
+
+        urls = [item.url for item in diversified]
+        self.assertEqual(urls[0], "https://pnj.com.vn/site/gia-vang")
+        self.assertIn("https://vn.investing.com/currencies/xau-usd", urls)
+        self.assertNotIn("https://pnj.com.vn/site/gia-vang?r=1728703561644", urls)
+        self.assertNotIn("https://giavang.pnj.com.vn/", urls)
+        self.assertNotIn("https://investing.com/currencies/xau-usd", urls)
+
+    def test_fx_pair_queries_prefer_exact_pair_order_over_inverse_pair(self) -> None:
+        coordinator = SearchCoordinator(Settings(web_search_tavily_api_key="test-key", redis_url=""))
+
+        async def fake_search(*args, **kwargs):
+            return [
+                SearchResult(
+                    title="VND/USD",
+                    url="https://vn.investing.com/currencies/vnd-usd",
+                    snippet="VND/USD traded at 0.00004 today.",
+                    relevance_score=0.91,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+                SearchResult(
+                    title="USD/VND",
+                    url="https://xe.com/currencyconverter/convert?Amount=1&From=USD&To=VND",
+                    snippet="USD/VND traded around 25,430 today.",
+                    relevance_score=0.83,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                ),
+            ]
+
+        async def fake_deep_read(*args, **kwargs):
+            return False
+
+        coordinator.search_broker.search = fake_search  # type: ignore[assignment]
+        coordinator._deep_read_top_results = fake_deep_read  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="Ty gia USD VND hom nay bao nhieu?",
+                force=True,
+                mode="fast",
+                total_timeout_seconds=0.5,
+            )
+            self.assertEqual(
+                context.citations[0]["url"],
+                "https://xe.com/currencyconverter/convert?Amount=1&From=USD&To=VND",
+            )
+
+        asyncio.run(scenario())
 
     def test_price_query_guidance_and_fact_focus_are_numeric(self) -> None:
         coordinator = SearchCoordinator(Settings(web_search_tavily_api_key="test-key", redis_url=""))

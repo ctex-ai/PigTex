@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSystemInfo: () => ipcRenderer.invoke('app:get-system-info'),
     checkDesktopUpdate: (payload?: DesktopUpdateRequest) => ipcRenderer.invoke('app:check-desktop-update', payload),
     downloadAndInstallDesktopUpdate: (payload?: DesktopUpdateRequest) => ipcRenderer.invoke('app:download-and-install-desktop-update', payload),
+    resetLocalData: () => ipcRenderer.invoke('app:reset-local-data'),
     isSecureStorageAvailable: () => ipcRenderer.sendSync('settings:is-secure-storage-available'),
     getSecureApiKeys: () => ipcRenderer.sendSync('settings:get-secure-api-keys'),
     setSecureApiKeys: (payload: Record<string, string>) => ipcRenderer.sendSync('settings:set-secure-api-keys', payload),

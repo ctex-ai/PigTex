@@ -149,6 +149,17 @@ class Settings(BaseSettings):
     sync_stripe_price_sync_plus_monthly: str = ""
     sync_stripe_price_sync_plus_annual: str = ""
 
+    # TexAPI partner integration
+    texapi_partner_enabled: bool = False
+    texapi_partner_control_plane_base_url: str = "https://api.texapi.dev/v1/partner"
+    texapi_partner_gateway_base_url: str = "https://api.texapi.dev/v1/partner/gateway"
+    texapi_partner_client_id: str = ""
+    texapi_partner_client_secret: str = ""
+    texapi_partner_token_ttl_seconds: int = 3600
+    texapi_partner_refresh_buffer_seconds: int = 600
+    texapi_partner_timeout_seconds: float = 15.0
+    texapi_partner_webhook_signing_secret: str = ""
+
     # Server
     # Bind all interfaces intentionally for container/network deployments.
     host: str = "0.0.0.0"  # nosec B104

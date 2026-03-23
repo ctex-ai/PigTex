@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from .config import get_settings
+
 
 @dataclass(frozen=True)
 class DirectProviderSpec:
@@ -155,6 +157,7 @@ def is_first_party_provider_url(base_url: Optional[str], provider: Optional[str]
 
 
 def build_public_provider_catalog() -> list[dict[str, object]]:
+    settings = get_settings()
     return [
         {
             "id": "texapi",
@@ -162,11 +165,11 @@ def build_public_provider_catalog() -> list[dict[str, object]]:
             "kind": "gateway",
             "upstream_mode": "openai",
             "request_api_provider": "openai",
-            "default_base_url": "",
+            "default_base_url": settings.texapi_partner_gateway_base_url.strip(),
             "docs_url": "",
             "auth_style": "bearer",
-            "supports_byok": True,
-            "managed_by_server": False,
+            "supports_byok": False,
+            "managed_by_server": True,
             "aliases": ["texapi", "tex-api"],
         },
         *[

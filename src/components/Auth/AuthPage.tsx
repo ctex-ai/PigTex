@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Eye, EyeOff, Loader2, Mail, Lock, User, Github } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useI18n } from '../../contexts/I18nContext';
@@ -11,6 +11,8 @@ export function AuthPage() {
     const { language, isVietnamese, setLanguage } = useI18n();
     const [isLogin, setIsLogin] = useState(true);
     const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'github' | null>(null);
+    const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
+
     const [email, setEmail] = useState('');
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -42,6 +44,47 @@ export function AuthPage() {
         setPassword('');
     };
 
+    useEffect(() => {
+        const video = backgroundVideoRef.current;
+        if (!video) return;
+
+        const forcePlay = () => {
+            const playPromise = video.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch(() => {
+                    // Ignore autoplay rejections; browser may require a subsequent user gesture.
+                });
+            }
+        };
+
+        video.defaultMuted = true;
+        video.muted = true;
+        video.loop = true;
+        forcePlay();
+
+        const handleCanPlay = () => forcePlay();
+        const handleEnded = () => {
+            video.currentTime = 0;
+            forcePlay();
+        };
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                forcePlay();
+            }
+        };
+
+        video.addEventListener('canplay', handleCanPlay);
+        video.addEventListener('ended', handleEnded);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            video.removeEventListener('canplay', handleCanPlay);
+            video.removeEventListener('ended', handleEnded);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, []);
+
+    const backgroundVideoUrl = `${import.meta.env.BASE_URL}background.mp4`;
     const copy = isVietnamese ? {
         signInTitle: 'Đăng nhập bằng email',
         signUpTitle: 'Tạo tài khoản',
@@ -94,8 +137,18 @@ export function AuthPage() {
 
     return (
         <div className="auth-page">
-            <div className="auth-bg-layer auth-bg-layer-primary" />
-            <div className="auth-bg-layer auth-bg-layer-secondary" />
+            <video
+                ref={backgroundVideoRef}
+                className="auth-bg-video"
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="auto"
+                disablePictureInPicture
+            >
+                <source src={backgroundVideoUrl} type="video/mp4" />
+            </video>
 
             {/* Decorative orbit rings */}
             <div className="auth-orbit auth-orbit-1" />

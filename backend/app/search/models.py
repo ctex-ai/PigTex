@@ -61,6 +61,9 @@ class SearchResult:
     domain: str = ""
     recency_score: float = 0.0
     credibility_score: float = 0.0
+    result_type: str = "unknown"
+    numeric_signal_score: float = 0.0
+    evidence_quality_score: float = 0.0
 
 
 @dataclass

@@ -16,6 +16,7 @@ alembic>=1.13.0
 cryptography>=42.0.0
 boto3>=1.34.0
 ddgs==9.11.3
+playwright>=1.48.0
 
 # Local Embeddings
 sentence-transformers==2.2.2

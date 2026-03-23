@@ -1,19 +1,11 @@
 {
   "extends": "./electron-builder.base.json",
-  "afterPack": "./scripts/signing/after-pack-sign-windows.cjs",
+  "afterPack": "./scripts/after-pack-sign-windows.cjs",
   "forceCodeSigning": true,
-  "publish": [
-    {
-      "provider": "github",
-      "owner": "ctex-ai",
-      "repo": "PigTex",
-      "releaseType": "release"
-    }
-  ],
   "win": {
     "signAndEditExecutable": false,
     "signtoolOptions": {
-      "sign": "./scripts/signing/custom-windows-sign.cjs"
+      "sign": "./scripts/custom-windows-sign.cjs"
     }
   },
   "nsis": {

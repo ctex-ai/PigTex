@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -21,31 +20,7 @@ class PromptPackStore:
     DEFAULT_TTL = timedelta(seconds=120)
 
     @classmethod
-    def _resolve_env_data_dir(cls) -> Optional[Path]:
-        raw_value = (
-            os.getenv("PIGTEX_DATA_DIR", "").strip()
-            or os.getenv("PIGTEX_PROMPT_PACKS_DIR", "").strip()
-        )
-        if not raw_value:
-            return None
-
-        candidate = Path(raw_value).expanduser()
-        if candidate.name == "system_prompts" and candidate.is_dir():
-            candidate = candidate.parent
-
-        if (candidate / "system_prompts").exists():
-            return candidate
-
-        logger.warning("Ignoring prompt pack directory without system_prompts/: %s", candidate)
-        return None
-
-    @classmethod
     def resolve_data_dir(cls) -> Optional[Path]:
-        env_data_dir = cls._resolve_env_data_dir()
-        if env_data_dir:
-            cls._data_dir = env_data_dir
-            return env_data_dir
-
         if cls._data_dir and cls._data_dir.exists():
             return cls._data_dir
 

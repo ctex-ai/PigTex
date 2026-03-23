@@ -18,7 +18,6 @@ from typing import Any, Iterable, Optional
 
 import httpx
 
-from ..local_storage.scope import get_storage_root
 from .packs import PromptPackStore
 
 logger = logging.getLogger(__name__)
@@ -301,15 +300,10 @@ class SkillFoundry:
 
     @classmethod
     def _resolve_skill_root(cls) -> Path:
-        configured_root = os.getenv("PIGTEX_SKILL_FOUNDRY_DIR", "").strip()
-        if configured_root:
-            return Path(configured_root).expanduser()
-
         data_dir = PromptPackStore.resolve_data_dir()
-        if data_dir:
-            return data_dir / "skill_foundry"
-
-        return get_storage_root() / "skill_foundry"
+        if not data_dir:
+            raise RuntimeError("Could not resolve PigTex data directory")
+        return data_dir / "skill_foundry"
 
     def registry_path(self) -> Path:
         return self.data_root / self.REGISTRY_FILE

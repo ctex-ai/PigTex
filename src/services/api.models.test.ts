@@ -98,4 +98,27 @@ describe('model list freshness', () => {
         expect(headers.get('X-API-Key')).toBe('texapi-key-123')
         expect(headers.get('X-API-Base-URL')).toBe('https://api.texapi.dev/v1')
     })
+
+    it('forwards the managed TexAPI gateway base URL even when no BYOK key is present', async () => {
+        savePigTexSettings({
+            ...DEFAULT_PIGTEX_SETTINGS,
+            apiProvider: 'auto',
+            customEndpoint: 'openai',
+            apiKey: '',
+            baseUrl: 'https://api.texapi.dev/v1/partner/gateway',
+        })
+        fetchMock.mockResolvedValueOnce(buildJsonResponse({
+            data: [{ id: 'provider-model-managed', owned_by: 'texapi' }]
+        }))
+
+        await expect(getModels()).resolves.toMatchObject([
+            { id: 'provider-model-managed' }
+        ])
+
+        const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+        const headers = new Headers(init.headers)
+        expect(headers.get('X-API-Key')).toBeNull()
+        expect(headers.get('X-API-Provider')).toBe('openai')
+        expect(headers.get('X-API-Base-URL')).toBe('https://api.texapi.dev/v1/partner/gateway')
+    })
 })

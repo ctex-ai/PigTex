@@ -984,15 +984,15 @@ function applyProviderHeaders(
 ): void {
     const resolved = resolveProviderCredentials(overrides);
     headers['X-API-Provider'] = resolved.provider;
-    if (!resolved.apiKey) {
-        // No BYOK key: keep selected protocol only; upstream calls that require
-        // credentials will fail until the user provides them.
-        return;
-    }
-    headers['X-API-Key'] = resolved.apiKey;
     if (resolved.baseUrl) {
         headers['X-API-Base-URL'] = resolved.baseUrl;
     }
+    if (!resolved.apiKey) {
+        // No BYOK key: still forward the selected base URL so the backend can
+        // resolve managed providers without polluting the direct-provider flow.
+        return;
+    }
+    headers['X-API-Key'] = resolved.apiKey;
 }
 
 function resolveProviderCredentials(
@@ -1011,14 +1011,6 @@ function resolveProviderCredentials(
     const baseUrl = resolveUpstreamBaseUrlForEnvironment(overrides?.baseUrl ?? settings.baseUrl, IS_PRODUCTION_BUILD);
     const provider = resolveUpstreamProvider(providerMode, customEndpoint, baseUrl, apiKey);
 
-    if (!apiKey) {
-        return {
-            apiKey: '',
-            baseUrl: '',
-            provider,
-        };
-    }
-
     const autoDefaultBaseUrl = normalizeBaseUrl(getProviderDefaultBaseUrl('auto'));
     let resolvedBaseUrl = baseUrl;
     if (!resolvedBaseUrl) {
@@ -1026,6 +1018,14 @@ function resolveProviderCredentials(
     }
     if (provider !== 'openai' && resolvedBaseUrl === autoDefaultBaseUrl) {
         resolvedBaseUrl = normalizeBaseUrl(getProviderDefaultBaseUrl(provider));
+    }
+
+    if (!apiKey) {
+        return {
+            apiKey: '',
+            baseUrl: resolvedBaseUrl,
+            provider,
+        };
     }
 
     return {

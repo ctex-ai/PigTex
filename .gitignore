@@ -8,12 +8,12 @@ backend/.env.*
 !backend/.env.production.example
 
 # Node / Electron artifacts
-/node_modules/
-/.npm-cache/
-/dist/
-/dist-electron/
-/release/
-/release-staged/
+node_modules/
+.npm-cache/
+dist/
+dist-electron/
+release/
+release-staged/
 *.tsbuildinfo
 npm-debug.log*
 yarn-error.log*

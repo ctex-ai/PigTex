@@ -42,9 +42,9 @@ class V1ProviderCatalogTests(unittest.TestCase):
 
         texapi = body["data"][0]
         self.assertEqual(texapi["kind"], "gateway")
-        self.assertEqual(texapi["default_base_url"], "")
-        self.assertFalse(texapi["managed_by_server"])
-        self.assertTrue(texapi["supports_byok"])
+        self.assertEqual(texapi["default_base_url"], "https://api.texapi.dev/v1/partner/gateway")
+        self.assertTrue(texapi["managed_by_server"])
+        self.assertFalse(texapi["supports_byok"])
 
         google = next(item for item in body["data"] if item["id"] == "google")
         self.assertEqual(google["request_api_provider"], "gemini")

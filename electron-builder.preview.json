@@ -1,6 +1,6 @@
 {
   "extends": "./electron-builder.base.json",
-  "afterPack": "./scripts/build/edit-windows-resources.cjs",
+  "afterPack": "./scripts/after-pack-edit-windows-resources.cjs",
   "win": {
     "signAndEditExecutable": false
   },

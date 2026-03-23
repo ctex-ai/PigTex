@@ -19,10 +19,7 @@ router = APIRouter(prefix="/skill-foundry", tags=["Skill Foundry"])
 
 
 class SkillFoundryCompileRequest(BaseModel):
-    input_path: Optional[str] = Field(
-        default=None,
-        description="Relative path inside the configured Skill Foundry incoming folder",
-    )
+    input_path: Optional[str] = Field(default=None, description="Relative path inside data/skill_foundry/incoming")
     dry_run: bool = False
     max_files: Optional[int] = Field(default=None, ge=1, le=2000)
     judge_model: Optional[str] = None
@@ -67,10 +64,7 @@ def _resolve_compile_path(foundry: SkillFoundry, raw_path: Optional[str]) -> Pat
     candidate = Path(raw_path)
     resolved = (incoming_root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
     if incoming_root != resolved and incoming_root not in resolved.parents:
-        raise HTTPException(
-            status_code=400,
-            detail="input_path must stay inside the configured Skill Foundry incoming folder",
-        )
+        raise HTTPException(status_code=400, detail="input_path must stay inside data/skill_foundry/incoming")
     return resolved
 
 

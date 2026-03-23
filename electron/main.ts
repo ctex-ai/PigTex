@@ -1,8 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, session } from 'electron'
 import { cpSync, existsSync, mkdirSync, promises as fs, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
+import http from 'http'
+import https from 'https'
 import os from 'os'
 import path from 'path'
-import { checkDesktopUpdate, downloadAndInstallDesktopUpdate } from './desktopUpdater'
 
 type FsEntry = {
     name: string
@@ -21,6 +22,7 @@ const LOCAL_SESSION_STATE_FILE_NAME = 'local-session-state.json'
 const SECURE_API_KEYS_FILE_NAME = 'secure-api-keys.bin'
 const SECURE_AUTH_TOKEN_FILE_NAME = 'secure-auth-token.bin'
 const SECURE_API_PROVIDER_IDS = ['auto', 'openai', 'anthropic', 'gemini', 'alibaba'] as const
+const DEFAULT_DESKTOP_UPDATE_MANIFEST_URL = 'https://example.com/api/desktop/latest'
 const STABLE_USER_DATA_DIR_NAME = 'PigTex'
 const LEGACY_USER_DATA_MARKER_FILE_NAMES = [
     LOCAL_SESSION_STATE_FILE_NAME,
@@ -81,6 +83,35 @@ type LocalSessionState = {
     rootPath: string | null
     filePath: string | null
     fileName: string | null
+}
+
+type RemoteDesktopUpdateManifest = {
+    product?: string
+    channel?: string
+    platform?: string
+    version: string
+    downloadPageUrl: string
+    installerUrl: string | null
+    publishedAt: string | null
+    releaseNotes: string | null
+    requiresManualInstall: boolean
+    upgradeBehavior: string | null
+}
+
+type DesktopUpdateInstallResult =
+    | {
+        status: 'up_to_date'
+        currentVersion: string
+    }
+    | {
+        status: 'opened'
+        currentVersion: string
+        version: string
+        downloadPageUrl: string
+    }
+
+type DesktopUpdateRequest = {
+    manifestUrl?: string | null
 }
 
 const DEFAULT_LOCAL_SESSION_STATE: LocalSessionState = {
@@ -374,6 +405,203 @@ function getErrorCode(error: unknown): string | undefined {
     return typeof code === 'string' ? code : undefined
 }
 
+function normalizeOptionalNonEmptyString(value: unknown): string | null {
+    if (typeof value !== 'string') {
+        return null
+    }
+
+    const normalized = value.trim()
+    return normalized || null
+}
+
+function normalizePublicHttpUrl(value: unknown): string | null {
+    const normalized = normalizeOptionalNonEmptyString(value)
+    if (!normalized) {
+        return null
+    }
+
+    try {
+        const parsedUrl = new URL(normalized)
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            return null
+        }
+        return parsedUrl.toString()
+    } catch {
+        return null
+    }
+}
+
+function getDesktopUpdateManifestUrl(overrideUrl?: unknown): string {
+    const requestedUrl = normalizePublicHttpUrl(overrideUrl)
+    const configuredUrl = normalizePublicHttpUrl(process.env.PIGTEX_DESKTOP_UPDATE_MANIFEST_URL)
+    return requestedUrl || configuredUrl || DEFAULT_DESKTOP_UPDATE_MANIFEST_URL
+}
+
+function fetchRemoteText(urlString: string, redirectCount = 0): Promise<string> {
+    return new Promise((resolve, reject) => {
+        let request: http.ClientRequest | null = null
+
+        try {
+            const requestUrl = new URL(urlString)
+            const client = requestUrl.protocol === 'http:' ? http : https
+            request = client.get(
+                requestUrl,
+                {
+                    headers: {
+                        Accept: 'application/json',
+                        'User-Agent': `PigTex/${app.getVersion()}`
+                    }
+                },
+                (response) => {
+                    const statusCode = response.statusCode ?? 0
+                    const location = response.headers.location
+
+                    if ([301, 302, 303, 307, 308].includes(statusCode) && location) {
+                        response.resume()
+                        if (redirectCount >= 3) {
+                            reject(new Error('Update manifest redirected too many times'))
+                            return
+                        }
+                        const nextUrl = new URL(location, requestUrl).toString()
+                        resolve(fetchRemoteText(nextUrl, redirectCount + 1))
+                        return
+                    }
+
+                    if (statusCode < 200 || statusCode >= 300) {
+                        response.resume()
+                        reject(new Error(`Update manifest request failed with status ${statusCode}`))
+                        return
+                    }
+
+                    const chunks: Buffer[] = []
+                    response.on('data', (chunk) => {
+                        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+                    })
+                    response.on('end', () => {
+                        resolve(Buffer.concat(chunks).toString('utf8'))
+                    })
+                }
+            )
+
+            request.setTimeout(10000, () => {
+                request?.destroy(new Error('Update manifest request timed out'))
+            })
+            request.on('error', reject)
+        } catch (error) {
+            request?.destroy()
+            reject(error)
+        }
+    })
+}
+
+function sanitizeRemoteDesktopUpdateManifest(raw: unknown): RemoteDesktopUpdateManifest {
+    if (!raw || typeof raw !== 'object') {
+        throw new Error('Update manifest payload is invalid')
+    }
+
+    const value = raw as Record<string, unknown>
+    const version = normalizeOptionalNonEmptyString(value.version)
+    const downloadPageUrl = normalizePublicHttpUrl(value.downloadPageUrl)
+    const installerUrl = normalizePublicHttpUrl(value.installerUrl)
+
+    if (!version) {
+        throw new Error('Update manifest is missing version')
+    }
+    if (!downloadPageUrl && !installerUrl) {
+        throw new Error('Update manifest is missing download URL')
+    }
+
+    return {
+        product: normalizeOptionalNonEmptyString(value.product) || undefined,
+        channel: normalizeOptionalNonEmptyString(value.channel) || undefined,
+        platform: normalizeOptionalNonEmptyString(value.platform) || undefined,
+        version,
+        downloadPageUrl: downloadPageUrl || installerUrl!,
+        installerUrl,
+        publishedAt: normalizeOptionalNonEmptyString(value.publishedAt),
+        releaseNotes: normalizeOptionalNonEmptyString(value.releaseNotes),
+        requiresManualInstall: value.requiresManualInstall !== false,
+        upgradeBehavior: normalizeOptionalNonEmptyString(value.upgradeBehavior)
+    }
+}
+
+async function fetchDesktopUpdateManifest(overrideUrl?: unknown): Promise<RemoteDesktopUpdateManifest> {
+    const manifestUrl = getDesktopUpdateManifestUrl(overrideUrl)
+    const payload = await fetchRemoteText(manifestUrl)
+    const parsedPayload = JSON.parse(payload)
+    return sanitizeRemoteDesktopUpdateManifest(parsedPayload)
+}
+
+function parseVersionCore(value: string): [number, number, number] {
+    const trimmed = value.trim()
+    if (!trimmed) {
+        return [0, 0, 0]
+    }
+
+    const withoutPrefix = trimmed.startsWith('v') ? trimmed.slice(1) : trimmed
+    const mainPart = withoutPrefix.split('-', 2)[0]?.split('+', 2)[0] || ''
+    const rawParts = mainPart.split('.').slice(0, 3)
+    if (rawParts.length === 0) {
+        return [0, 0, 0]
+    }
+
+    const parts = rawParts.map((part) => {
+        if (!part) {
+            return null
+        }
+        for (const char of part) {
+            const code = char.charCodeAt(0)
+            if (code < 48 || code > 57) {
+                return null
+            }
+        }
+        return Number(part)
+    })
+
+    if (parts.some((part) => part === null)) {
+        return [0, 0, 0]
+    }
+
+    return [
+        parts[0] ?? 0,
+        parts[1] ?? 0,
+        parts[2] ?? 0
+    ]
+}
+
+function compareVersionCore(leftVersion: string, rightVersion: string): number {
+    const left = parseVersionCore(leftVersion)
+    const right = parseVersionCore(rightVersion)
+
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) {
+            return left[index] > right[index] ? 1 : -1
+        }
+    }
+
+    return 0
+}
+
+async function openDesktopUpdateWebsite(overrideUrl?: unknown): Promise<DesktopUpdateInstallResult> {
+    const manifest = await fetchDesktopUpdateManifest(overrideUrl)
+    const currentVersion = app.getVersion()
+    if (compareVersionCore(currentVersion, manifest.version) >= 0) {
+        return {
+            status: 'up_to_date',
+            currentVersion
+        }
+    }
+
+    await shell.openExternal(manifest.downloadPageUrl)
+
+    return {
+        status: 'opened',
+        currentVersion,
+        version: manifest.version,
+        downloadPageUrl: manifest.downloadPageUrl
+    }
+}
+
 function requireNonEmptyString(value: unknown, fieldLabel: string): string {
     if (typeof value !== 'string') {
         throw new Error(`${fieldLabel} is required`)
@@ -530,6 +758,81 @@ async function updateLocalSessionState(
     }
 
     return writeLocalSessionState(nextState)
+}
+
+function getMachineLocalPigTexDataRootPath(): string {
+    return path.join(app.getPath('appData'), '.pigtex')
+}
+
+function collectLegacyDesktopUserDataPathsForReset(): string[] {
+    const currentUserDataPath = normalizePath(app.getPath('userData'))
+    const candidateBaseDirs = [app.getPath('appData')]
+    const localAppDataPath = (process.env.LOCALAPPDATA || '').trim()
+    if (localAppDataPath) {
+        candidateBaseDirs.push(localAppDataPath)
+    }
+
+    return Array.from(new Set(
+        candidateBaseDirs.flatMap((baseDir) => collectCandidateLegacyUserDataPaths(baseDir))
+    )).filter((candidatePath) => {
+        const normalizedCandidatePath = normalizePath(candidatePath)
+        return normalizedCandidatePath !== currentUserDataPath
+            && hasLegacyUserDataMarkersSync(candidatePath)
+    })
+}
+
+async function removePathForLocalReset(targetPath: string, removedPaths: string[]): Promise<void> {
+    const normalizedTarget = normalizePath(targetPath)
+    try {
+        await fs.rm(normalizedTarget, {
+            recursive: true,
+            force: true,
+            maxRetries: 3,
+            retryDelay: 80,
+        })
+        removedPaths.push(normalizedTarget)
+    } catch (error) {
+        console.error(`Failed to remove PigTex local data at "${normalizedTarget}":`, error)
+        throw new Error(`Failed to clear local data at ${normalizedTarget}`)
+    }
+}
+
+async function resetPigTexLocalData(): Promise<{ ok: true; removedPaths: string[] }> {
+    const removedPaths: string[] = []
+
+    try {
+        await session.defaultSession.clearStorageData()
+    } catch (error) {
+        console.error('Failed to clear Electron storage data:', error)
+        throw new Error('Failed to clear local browser storage')
+    }
+
+    try {
+        await session.defaultSession.clearCache()
+    } catch (error) {
+        console.warn('Failed to clear Electron cache during local reset:', error)
+    }
+
+    localSessionStateCache = cloneLocalSessionState(DEFAULT_LOCAL_SESSION_STATE)
+    allowedRoots.clear()
+    undoStack.length = 0
+
+    const targetPaths = [
+        getSecureApiKeysFilePath(),
+        getSecureAuthTokenFilePath(),
+        getLocalSessionStateFilePath(),
+        getMachineLocalPigTexDataRootPath(),
+        ...collectLegacyDesktopUserDataPathsForReset(),
+    ]
+
+    for (const targetPath of Array.from(new Set(targetPaths))) {
+        await removePathForLocalReset(targetPath, removedPaths)
+    }
+
+    return {
+        ok: true,
+        removedPaths,
+    }
 }
 
 function isWithinRoot(rootPath: string, targetPath: string): boolean {
@@ -819,12 +1122,23 @@ function registerIpcHandlers() {
         appVersion: app.getVersion(),
     }))
 
-    ipcMain.handle('app:check-desktop-update', async (_event, payload?: { manifestUrl?: string | null }) => {
-        return checkDesktopUpdate(payload?.manifestUrl)
+    ipcMain.handle('app:check-desktop-update', async (_event, payload?: DesktopUpdateRequest) => {
+        const checkedAt = new Date().toISOString()
+        const manifest = await fetchDesktopUpdateManifest(payload?.manifestUrl)
+
+        return {
+            currentVersion: app.getVersion(),
+            checkedAt,
+            manifest
+        }
     })
 
-    ipcMain.handle('app:download-and-install-desktop-update', async (_event, payload?: { manifestUrl?: string | null }) => {
-        return downloadAndInstallDesktopUpdate(payload?.manifestUrl)
+    ipcMain.handle('app:download-and-install-desktop-update', async (_event, payload?: DesktopUpdateRequest) => {
+        return openDesktopUpdateWebsite(payload?.manifestUrl)
+    })
+
+    ipcMain.handle('app:reset-local-data', async () => {
+        return resetPigTexLocalData()
     })
 
     ipcMain.on('settings:is-secure-storage-available', (event) => {

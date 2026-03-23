@@ -15,14 +15,16 @@ from dataclasses import replace
 from datetime import date, datetime, timezone
 from time import perf_counter
 from typing import Deque, Dict, Iterable, List, Sequence, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from ..config import Settings
 from .extractor import (
+    annotate_result_signals,
     build_claim_verification,
     compute_result_score,
     extract_facts_and_citations,
     enrich_and_rank_results,
+    is_result_topic_match,
 )
 from .models import (
     SearchContext,
@@ -211,6 +213,71 @@ class SearchCoordinator:
         "community": ("reddit.com", "news.ycombinator.com"),
         "troubleshooting": ("stackoverflow.com", "github.com", "reddit.com"),
     }
+    ASSET_DOMAIN_HINTS = {
+        "precious_metals": (
+            "pnj.com.vn",
+            "giavang.pnj.com.vn",
+            "sjc.com.vn",
+            "vn.investing.com",
+            "investing.com",
+            "doji.vn",
+            "phuquygroup.vn",
+            "giavang.org",
+            "kitco.com",
+            "goldprice.org",
+            "tradingeconomics.com",
+        ),
+        "fx": (
+            "xe.com",
+            "vn.investing.com",
+            "investing.com",
+            "wise.com",
+            "tradingeconomics.com",
+        ),
+        "crypto": (
+            "coingecko.com",
+            "coinmarketcap.com",
+            "binance.com",
+            "vn.investing.com",
+            "investing.com",
+            "tradingview.com",
+        ),
+        "equities": (
+            "finance.yahoo.com",
+            "marketwatch.com",
+            "vn.investing.com",
+            "investing.com",
+            "tradingview.com",
+            "companiesmarketcap.com",
+        ),
+        "fuel": (
+            "petrolimex.com.vn",
+            "pvoil.com.vn",
+            "tradingeconomics.com",
+            "oilprice.com",
+            "gasbuddy.com",
+        ),
+    }
+    TRACKING_QUERY_KEYS = {
+        "srsltid",
+        "r",
+        "fbclid",
+        "gclid",
+        "mc_cid",
+        "mc_eid",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+    }
+    ASSET_PROFILE_PATTERNS = {
+        "precious_metals": re.compile(r"(?i)\b(?:gold|vàng|vang|xau|silver|bạc|bac|xag|platinum|bạch kim|bach kim|xpt|palladium|xpd|sjc|pnj|doji)\b"),
+        "fx": re.compile(r"(?i)\b(?:usd|eur|gbp|jpy|cny|vnd|chf|cad|aud|sgd|forex|exchange rate|currency|tỷ giá|ty gia)\b"),
+        "crypto": re.compile(r"(?i)\b(?:bitcoin|btc|ethereum|eth|solana|sol|bnb|usdt|doge|xrp|ada|crypto|coin|token)\b"),
+        "equities": re.compile(r"(?i)\b(?:stock|stocks|share|shares|cổ phiếu|co phieu|ticker|symbol|nasdaq|nyse|hose|hnx|upcom)\b"),
+        "fuel": re.compile(r"(?i)\b(?:xăng|dầu|xăng dầu|xang|dau|gasoline|gas price|petrol|diesel|oil|crude)\b"),
+    }
     PRICE_QUERY_RE = re.compile(
         r"(?i)(?:\b(?:price|pricing|cost|quote|quoted|rate|fee|fees|how much|bao nhieu|gia|phi|ty gia)\b|giá|phí|tỷ giá)"
     )
@@ -223,6 +290,10 @@ class SearchCoordinator:
         r"úùủũụứừửữự"
         r"ýỳỷỹỵ]"
     )
+    MARKET_PAIR_TOKENS = {
+        "usd", "eur", "gbp", "jpy", "cny", "vnd", "chf", "cad", "aud", "sgd",
+        "btc", "eth", "xau", "xag", "xpt", "xpd",
+    }
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -363,6 +434,9 @@ class SearchCoordinator:
                 "domain": result.domain,
                 "recency_score": result.recency_score,
                 "credibility_score": result.credibility_score,
+                "result_type": result.result_type,
+                "numeric_signal_score": result.numeric_signal_score,
+                "evidence_quality_score": result.evidence_quality_score,
             }
             for result in results
         ]
@@ -393,6 +467,9 @@ class SearchCoordinator:
                         domain=str(item.get("domain") or "").strip(),
                         recency_score=float(item.get("recency_score") or 0.0),
                         credibility_score=float(item.get("credibility_score") or 0.0),
+                        result_type=str(item.get("result_type") or "unknown").strip() or "unknown",
+                        numeric_signal_score=float(item.get("numeric_signal_score") or 0.0),
+                        evidence_quality_score=float(item.get("evidence_quality_score") or 0.0),
                     )
                 )
             except Exception:
@@ -451,6 +528,7 @@ class SearchCoordinator:
                 "If sources disagree, return the tightest defensible range and name the source/date for each number.",
                 "Always include currency plus the observed date, time, market, or region when the source provides it.",
                 "Do not use vague wording such as 'khá cao' or 'dao động' without numbers.",
+                "If reliable live sources do not clearly support a number, explicitly say you could not verify the current price and do not guess.",
             ]
 
         should_search = force or intent != SearchIntent.NO_SEARCH or resolved_mode != SearchMode.AUTO
@@ -473,6 +551,8 @@ class SearchCoordinator:
                 url_results,
                 mode=SearchMode.URL_READ,
                 preferred_domains=preferred_domains,
+                query_text=text,
+                focus="price" if price_query else None,
             )
             facts, citations = extract_facts_and_citations(
                 ranked_url_results,
@@ -482,6 +562,7 @@ class SearchCoordinator:
                 preferred_domains=preferred_domains,
                 preserve_formatting=True,
                 focus="price" if price_query else None,
+                query_text=text,
             )
             context.facts = facts
             context.citations = citations
@@ -557,6 +638,24 @@ class SearchCoordinator:
             )
 
         deduped_results = self._dedupe_results(all_results)
+        deduped_results, filtered_count = self._filter_topic_mismatch_results(
+            deduped_results,
+            query_text=text,
+        )
+        if filtered_count:
+            context.warnings.append(
+                f"PigTex filtered {filtered_count} off-topic search result(s) that did not match the requested subject."
+            )
+        if price_query:
+            deduped_results, price_filtered_count = self._filter_price_market_results(
+                deduped_results,
+                query_text=text,
+                preferred_domains=preferred_domains,
+            )
+            if price_filtered_count:
+                context.warnings.append(
+                    f"PigTex filtered {price_filtered_count} low-value price result(s) and kept the most direct market pages."
+                )
         if planned_queries and not deduped_results:
             context.warnings.append("Web search did not return any usable source results.")
 
@@ -573,18 +672,34 @@ class SearchCoordinator:
                     context,
                     "PigTex ran out of time while opening full source pages. The answer may rely on source snippets.",
                 )
+            deduped_results = self._dedupe_results(deduped_results)
+            if price_query:
+                deduped_results, deep_read_price_filtered_count = self._filter_price_market_results(
+                    deduped_results,
+                    query_text=text,
+                    preferred_domains=preferred_domains,
+                )
+                if deep_read_price_filtered_count:
+                    context.warnings.append(
+                        f"PigTex filtered {deep_read_price_filtered_count} additional low-value price result(s) after opening source pages."
+                    )
 
         ranked_results = enrich_and_rank_results(
             deduped_results,
             mode=resolved_mode,
             preferred_domains=preferred_domains,
+            query_text=text,
+            focus="price" if price_query else None,
         )
+        if price_query:
+            ranked_results = self._diversify_price_results(ranked_results)
         facts, citations = extract_facts_and_citations(
             ranked_results,
             max_facts=max(limit + 1, 6),
             mode=resolved_mode,
             preferred_domains=preferred_domains,
             focus="price" if price_query else None,
+            query_text=text,
         )
 
         context.facts = facts
@@ -607,6 +722,19 @@ class SearchCoordinator:
                 )
         else:
             context.confidence_score = self._compute_context_confidence(citations, mode=resolved_mode)
+
+        if price_query:
+            has_sufficient_price_evidence, price_warning = self._assess_price_evidence(citations)
+            if not has_sufficient_price_evidence and price_warning:
+                self._add_warning_once(context, price_warning)
+                context.confidence_score = min(context.confidence_score, 0.42)
+                context.answer_guidance.append(
+                    "Do not answer with a specific current number unless the cited evidence directly shows that number."
+                )
+            elif has_sufficient_price_evidence:
+                context.answer_guidance.append(
+                    "Prefer the direct quote or listing pages in the citations over commentary articles when stating the number."
+                )
 
         if official_domains and needs_official_sources and resolved_mode == SearchMode.DEEP_VERIFY:
             if not any(self._matches_preferred_domain(str(cite.get("domain") or ""), official_domains) for cite in citations):
@@ -731,11 +859,89 @@ class SearchCoordinator:
             for hint in (" hôm nay", " hom nay", " bao nhiêu", " bao nhieu", " giá", " phí", " tỷ giá", " tỉ giá")
         )
 
+    def _normalize_search_seed(self, text: str, *, price_query: bool = False) -> str:
+        normalized = " ".join((text or "").strip().split())
+        normalized = normalized.strip(" \t\r\n?!,.")
+        if not price_query:
+            return normalized
+
+        normalized = re.sub(r"(?i)\b(?:bao nhiêu|bao nhieu|how much|là bao nhiêu|la bao nhieu)\b", "", normalized)
+        normalized = re.sub(r"\s{2,}", " ", normalized).strip(" \t\r\n?!,.")
+        return normalized
+
     def _contains_any_hint(self, text: str, hints: Sequence[str]) -> bool:
         normalized = (text or "").lower()
         if not normalized:
             return False
         return any(hint in normalized for hint in hints)
+
+    def _infer_asset_profiles(self, text: str) -> List[str]:
+        normalized = (text or "").strip()
+        if not normalized:
+            return []
+        profiles: List[str] = []
+        for profile_name, pattern in self.ASSET_PROFILE_PATTERNS.items():
+            if pattern.search(normalized):
+                profiles.append(profile_name)
+        return profiles
+
+    def _infer_asset_domains(self, text: str) -> List[str]:
+        normalized = (text or "").lower()
+        domains: List[str] = []
+        seen: set[str] = set()
+
+        def _add_domains(values: Sequence[str]) -> None:
+            for value in values:
+                domain = (value or "").strip().lower()
+                if not domain or domain in seen:
+                    continue
+                seen.add(domain)
+                domains.append(domain)
+
+        for profile_name in self._infer_asset_profiles(normalized):
+            _add_domains(self.ASSET_DOMAIN_HINTS.get(profile_name, ()))
+
+        return domains[:5]
+
+    def _infer_direct_market_query(self, text: str) -> str | None:
+        normalized = (text or "").lower()
+        is_vietnamese = self._looks_vietnamese_query(text)
+        if re.search(r"\b(?:gold|vàng|vang|xau)\b", normalized):
+            return "XAU/USD hôm nay" if is_vietnamese else "XAU/USD today"
+        if re.search(r"\b(?:silver|bạc|bac|xag)\b", normalized):
+            return "XAG/USD hôm nay" if is_vietnamese else "XAG/USD today"
+        if re.search(r"\b(?:bitcoin|btc)\b", normalized):
+            return "BTC/USD hôm nay" if is_vietnamese else "BTC/USD today"
+        if re.search(r"\b(?:ethereum|eth)\b", normalized):
+            return "ETH/USD hôm nay" if is_vietnamese else "ETH/USD today"
+        if re.search(r"\busd\b", normalized) and re.search(r"\bvnd\b", normalized):
+            return "USD/VND hôm nay" if is_vietnamese else "USD/VND today"
+        if re.search(r"\beur\b", normalized) and re.search(r"\busd\b", normalized):
+            return "EUR/USD hôm nay" if is_vietnamese else "EUR/USD today"
+        return None
+
+    def _extract_explicit_market_pair(self, text: str) -> Tuple[str, str] | None:
+        tokens = re.findall(r"[a-z]{3,4}", (text or "").lower())
+        pair: List[str] = []
+        for token in tokens:
+            if token not in self.MARKET_PAIR_TOKENS or token in pair:
+                continue
+            pair.append(token)
+            if len(pair) == 2:
+                return pair[0], pair[1]
+        return None
+
+    def _pair_match_kind(self, result: SearchResult, pair: Tuple[str, str]) -> str:
+        left, right = pair
+        exact_pattern = re.compile(rf"(?<![a-z0-9]){re.escape(left)}\s*(?:/|-|\s)\s*{re.escape(right)}(?![a-z0-9])")
+        reverse_pattern = re.compile(rf"(?<![a-z0-9]){re.escape(right)}\s*(?:/|-|\s)\s*{re.escape(left)}(?![a-z0-9])")
+
+        parts = [str(part).lower() for part in (result.url, result.title, result.snippet, result.full_content) if part]
+        if any(exact_pattern.search(part) for part in parts):
+            return "exact"
+        if any(reverse_pattern.search(part) for part in parts):
+            return "reverse"
+        return "none"
 
     def _infer_official_domains(self, text: str) -> List[str]:
         normalized = (text or "").lower()
@@ -799,6 +1005,8 @@ class SearchCoordinator:
             _add_domains(self.CONTEXT_DOMAIN_HINTS["community"])
         if troubleshooting_context:
             _add_domains(self.CONTEXT_DOMAIN_HINTS["troubleshooting"])
+        if self._is_price_query(text):
+            _add_domains(self._infer_asset_domains(text))
 
         if needs_official_sources:
             _add_domains(official_domains or [])
@@ -863,11 +1071,12 @@ class SearchCoordinator:
         preferred_domains: Sequence[str] | None = None,
         needs_official_sources: bool = False,
     ) -> List[SearchQuery]:
-        base = self._strip_urls(text)
+        raw_base = self._strip_urls(text)
+        price_query = self._is_price_query(raw_base)
+        base = self._normalize_search_seed(raw_base, price_query=price_query)
         if not base:
             return []
 
-        price_query = self._is_price_query(base)
         base_topic = self._query_topic_for_intent(base, intent, mode)
         candidates: List[SearchQuery] = [
             SearchQuery(
@@ -899,14 +1108,25 @@ class SearchCoordinator:
                         freshness_days=30,
                     )
                 )
-            candidates.append(
-                SearchQuery(
-                    query=f"{base} {'cập nhật giá' if is_vietnamese else 'latest price update'}",
-                    topic="news",
-                    priority=4,
-                    freshness_days=7,
+            if not preferred_domains:
+                candidates.append(
+                    SearchQuery(
+                        query=f"{base} {'cập nhật giá' if is_vietnamese else 'latest price update'}",
+                        topic="news",
+                        priority=4,
+                        freshness_days=7,
+                    )
                 )
-            )
+            direct_market_query = self._infer_direct_market_query(base)
+            if direct_market_query:
+                candidates.append(
+                    SearchQuery(
+                        query=direct_market_query,
+                        topic="general",
+                        priority=4,
+                        freshness_days=7,
+                    )
+                )
             if needs_official_sources:
                 candidates.append(
                     SearchQuery(
@@ -989,6 +1209,197 @@ class SearchCoordinator:
             if len(deduped) >= 6:
                 break
         return deduped
+
+    def _filter_topic_mismatch_results(
+        self,
+        results: Sequence[SearchResult],
+        *,
+        query_text: str,
+    ) -> Tuple[List[SearchResult], int]:
+        matched: List[SearchResult] = []
+        filtered_count = 0
+        for result in results:
+            if is_result_topic_match(result, query_text):
+                matched.append(result)
+            else:
+                filtered_count += 1
+        if matched:
+            return matched, filtered_count
+        return list(results), 0
+
+    def _result_domain(self, result: SearchResult) -> str:
+        domain = (result.domain or "").strip().lower()
+        if not domain:
+            domain = (urlparse(result.url).netloc or "").strip().lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain
+
+    def _domain_family(self, domain: str) -> str:
+        normalized = (domain or "").strip().lower()
+        if normalized.startswith("www."):
+            normalized = normalized[4:]
+        if not normalized:
+            return ""
+        parts = [part for part in normalized.split(".") if part]
+        if len(parts) <= 2:
+            return normalized
+        if normalized.endswith((".com.vn", ".net.vn", ".org.vn", ".gov.vn", ".edu.vn")) and len(parts) >= 3:
+            return ".".join(parts[-3:])
+        return ".".join(parts[-2:])
+
+    def _diversify_price_results(self, results: Sequence[SearchResult]) -> List[SearchResult]:
+        diversified: List[SearchResult] = []
+        seen_families: set[str] = set()
+
+        for result in results:
+            if result.result_type in {"video_social", "challenge_page"}:
+                continue
+            family = self._domain_family(self._result_domain(result))
+            if family and family in seen_families:
+                continue
+            diversified.append(result)
+            if family:
+                seen_families.add(family)
+
+        return diversified or list(results)
+
+    def _filter_price_market_results(
+        self,
+        results: Sequence[SearchResult],
+        *,
+        query_text: str,
+        preferred_domains: Sequence[str] | None = None,
+    ) -> Tuple[List[SearchResult], int]:
+        if not results:
+            return [], 0
+
+        working: List[SearchResult] = []
+        filtered_count = 0
+        for result in results:
+            annotate_result_signals(result, query_text=query_text, focus="price")
+            if result.result_type in {"video_social", "challenge_page"}:
+                filtered_count += 1
+                continue
+            working.append(result)
+
+        explicit_pair = self._extract_explicit_market_pair(query_text)
+        if explicit_pair:
+            has_exact_pair = any(self._pair_match_kind(result, explicit_pair) == "exact" for result in working)
+            if has_exact_pair:
+                pair_filtered: List[SearchResult] = []
+                for result in working:
+                    if self._pair_match_kind(result, explicit_pair) == "reverse":
+                        filtered_count += 1
+                        continue
+                    pair_filtered.append(result)
+                working = pair_filtered
+
+        preferred_direct = [
+            result
+            for result in working
+            if self._matches_preferred_domain(self._result_domain(result), preferred_domains or [])
+            and result.result_type in {"quote_page", "listing_page"}
+            and (
+                result.numeric_signal_score >= 0.24
+                or result.evidence_quality_score >= 0.68
+            )
+        ]
+        if len(preferred_direct) >= 2:
+            selected: List[SearchResult] = list(preferred_direct)
+            for result in working:
+                if result in selected:
+                    continue
+                if (
+                    self._matches_preferred_domain(self._result_domain(result), preferred_domains or [])
+                    and result.evidence_quality_score >= 0.5
+                    and result.result_type in {"reference_page", "document"}
+                ):
+                    selected.append(result)
+                if len(selected) >= 6:
+                    break
+            filtered_count += max(0, len(working) - len(selected))
+            return selected, filtered_count
+
+        strong_direct = [
+            result
+            for result in working
+            if result.result_type in {"quote_page", "listing_page"}
+            and (
+                result.numeric_signal_score >= 0.28
+                or result.evidence_quality_score >= 0.72
+                or self._matches_preferred_domain(self._result_domain(result), preferred_domains or [])
+            )
+        ]
+        if strong_direct:
+            selected: List[SearchResult] = list(strong_direct)
+            for result in working:
+                if result in selected:
+                    continue
+                if (
+                    self._matches_preferred_domain(self._result_domain(result), preferred_domains or [])
+                    and result.evidence_quality_score >= 0.5
+                    and result.result_type in {"quote_page", "listing_page", "reference_page", "document"}
+                ):
+                    selected.append(result)
+                if len(selected) >= 6:
+                    break
+            filtered_count += max(0, len(working) - len(selected))
+            return selected, filtered_count
+
+        preferred_supported = [
+            result
+            for result in working
+            if self._matches_preferred_domain(self._result_domain(result), preferred_domains or [])
+            and result.evidence_quality_score >= 0.5
+            and result.result_type in {"quote_page", "listing_page", "reference_page", "document"}
+        ]
+        if len(preferred_supported) >= 2:
+            filtered_count += max(0, len(working) - len(preferred_supported))
+            return preferred_supported, filtered_count
+
+        viable = [result for result in working if result.evidence_quality_score >= 0.34]
+        if viable:
+            filtered_count += max(0, len(working) - len(viable))
+            return viable, filtered_count
+
+        return working, filtered_count
+
+    def _assess_price_evidence(self, citations: Sequence[Dict]) -> Tuple[bool, str | None]:
+        strong_direct = [
+            cite
+            for cite in citations
+            if str(cite.get("result_type") or "").strip().lower() in {"quote_page", "listing_page"}
+            and float(cite.get("numeric_signal_score") or 0.0) >= 0.28
+            and float(cite.get("evidence_quality_score") or 0.0) >= 0.6
+        ]
+        strong_direct_families = {
+            self._domain_family(str(cite.get("domain") or "").strip().lower())
+            for cite in strong_direct
+            if str(cite.get("domain") or "").strip()
+        }
+        if len(strong_direct) >= 2 and len({family for family in strong_direct_families if family}) >= 2:
+            return True, None
+
+        corroborated = [
+            cite
+            for cite in citations
+            if float(cite.get("numeric_signal_score") or 0.0) >= 0.28
+            and float(cite.get("evidence_quality_score") or 0.0) >= 0.5
+        ]
+        corroborated_families = {
+            self._domain_family(str(cite.get("domain") or "").strip().lower())
+            for cite in corroborated
+            if str(cite.get("domain") or "").strip()
+        }
+        if len(corroborated) >= 2 and len({family for family in corroborated_families if family}) >= 2:
+            return True, None
+
+        return (
+            False,
+            "Live search did not produce enough direct numeric evidence to safely quote a current number. "
+            "If you answer, say that the latest exact figure could not be verified yet instead of guessing.",
+        )
 
     def _plan_verify_queries(
         self,
@@ -1336,9 +1747,10 @@ class SearchCoordinator:
     def _dedupe_results(self, results: Iterable[SearchResult]) -> List[SearchResult]:
         by_url: Dict[str, SearchResult] = {}
         for result in results:
-            url = (result.url or "").strip()
+            url = self._canonicalize_result_url(result.url)
             if not url:
                 continue
+            result.url = url
             if url not in by_url:
                 by_url[url] = result
                 continue
@@ -1350,6 +1762,30 @@ class SearchCoordinator:
                 by_url[url] = result
 
         return list(by_url.values())
+
+    def _canonicalize_result_url(self, url: str) -> str:
+        normalized_url = (url or "").strip()
+        if not normalized_url:
+            return ""
+        try:
+            parsed = urlsplit(normalized_url)
+        except Exception:
+            return normalized_url
+
+        scheme = (parsed.scheme or "https").lower()
+        netloc = (parsed.netloc or "").strip().lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        path = parsed.path or "/"
+        if path != "/":
+            path = path.rstrip("/")
+        query_pairs = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if (key or "").strip().lower() not in self.TRACKING_QUERY_KEYS
+        ]
+        query = urlencode(query_pairs, doseq=True)
+        return urlunsplit((scheme, netloc, path, query, ""))
 
     def _compute_context_confidence(self, citations: Sequence[Dict], mode: SearchMode) -> float:
         if not citations:

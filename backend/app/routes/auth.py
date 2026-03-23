@@ -18,6 +18,7 @@ from ..models import OAuthAccount, User
 from ..oauth_state import delete_oauth_state, get_oauth_state, set_oauth_state
 from ..rate_limit import auth_login_rate_limit, auth_register_rate_limit
 from ..schemas import Token, UserCreate, UserLogin, UserResponse
+from ..services.texapi_partner_service import TexApiPartnerService
 from .auth_utils import (
     ROLE_ADMIN,
     ROLE_SUPER_ADMIN,
@@ -87,6 +88,20 @@ def _get_provider_credentials(provider: OAuthProvider) -> dict[str, str] | None:
 
 def _normalize_email(email: str) -> str:
     return (email or "").strip().lower()
+
+
+async def _maybe_upsert_texapi_partner_customer(user: User) -> None:
+    service = TexApiPartnerService()
+    if not service.is_enabled():
+        return
+    try:
+        await service.upsert_customer(user)
+    except Exception:
+        logger.warning(
+            "Best-effort TexAPI partner customer upsert failed user_id=%s",
+            str(getattr(user, "id", "")),
+            exc_info=True,
+        )
 
 
 def _normalize_username_seed(value: str) -> str:
@@ -785,6 +800,7 @@ async def oauth_callback(
         )
         return _render_oauth_result_page(False, str(completed_payload["error"]))
 
+    await _maybe_upsert_texapi_partner_customer(user)
     access_token = _issue_user_access_token(user)
     _complete_oauth_state(
         state,
@@ -829,6 +845,7 @@ async def register(
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
+        await _maybe_upsert_texapi_partner_customer(new_user)
         return new_user
     except IntegrityError as exc:
         db.rollback()

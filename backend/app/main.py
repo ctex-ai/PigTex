@@ -33,6 +33,7 @@ from .routes import auth, user, memory
 from .routes import v1_api
 from .routes import cloud_backup
 from .routes import sync_billing
+from .routes import texapi_partner
 from .routes import images as images_routes
 from .routes import files as files_routes
 from .routes import skill_foundry as skill_foundry_routes
@@ -91,6 +92,7 @@ app.include_router(user.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(cloud_backup.router, prefix="/api")
 app.include_router(sync_billing.router, prefix="/api")
+app.include_router(texapi_partner.router, prefix="/api")
 
 # V1 API - OpenAI-compatible endpoints (provider-agnostic BYOK)
 app.include_router(v1_api.router, prefix="/api")

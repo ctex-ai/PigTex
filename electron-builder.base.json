@@ -22,7 +22,7 @@
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "include": "scripts/build/nsis-install-mode.nsh",
+    "include": "scripts/nsis-install-mode.nsh",
     "allowElevation": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,

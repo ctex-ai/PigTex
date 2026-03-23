@@ -106,11 +106,11 @@ const providerCatalog: ApiProviderCatalogEntry[] = [
         kind: 'gateway',
         upstream_mode: 'openai',
         request_api_provider: 'openai',
-        default_base_url: '',
+        default_base_url: 'https://api.texapi.dev/v1/partner/gateway',
         docs_url: '',
         auth_style: 'bearer',
-        supports_byok: true,
-        managed_by_server: false,
+        supports_byok: false,
+        managed_by_server: true,
         aliases: ['texapi', 'tex-api']
     },
     {
@@ -364,6 +364,7 @@ describe('SettingsModal', () => {
     })
 
     afterEach(() => {
+        vi.useRealTimers()
         cleanup()
         vi.restoreAllMocks()
     })
@@ -445,7 +446,7 @@ describe('SettingsModal', () => {
                     baseUrl: getProviderDefaultBaseUrl('openai'),
                     providerCredentialProfiles: {
                         ...baseSettings.providerCredentialProfiles,
-                        auto: { apiKey: '', baseUrl: 'https://api.texapi.dev/v1' },
+                        auto: { apiKey: '', baseUrl: 'https://api.texapi.dev/v1/partner/gateway' },
                         openai: { apiKey: 'persist-key', baseUrl: getProviderDefaultBaseUrl('openai') },
                         anthropic: { apiKey: '', baseUrl: getProviderDefaultBaseUrl('anthropic') },
                         gemini: { apiKey: '', baseUrl: getProviderDefaultBaseUrl('gemini') },
@@ -474,7 +475,7 @@ describe('SettingsModal', () => {
 
         expect(saved.apiProvider).toBe(DEFAULT_PIGTEX_SETTINGS.apiProvider)
         expect(saved.apiKey).toBe('')
-        expect(saved.baseUrl).toBe('https://api.texapi.dev/v1')
+        expect(saved.baseUrl).toBe('https://api.texapi.dev/v1/partner/gateway')
         expect(saved.providerCredentialProfiles.openai.apiKey).toBe('persist-key')
         expect(saved.saveApiKeyLocally).toBe(true)
         expect(saved.temperature).toBe(DEFAULT_PIGTEX_SETTINGS.temperature)
@@ -611,7 +612,7 @@ describe('SettingsModal', () => {
             baseUrl: getProviderDefaultBaseUrl('openai'),
             providerCredentialProfiles: {
                 ...baseSettings.providerCredentialProfiles,
-                auto: { apiKey: 'texapi-key-1', baseUrl: 'https://api.texapi.dev/v1' },
+                auto: { apiKey: 'texapi-key-1', baseUrl: 'https://api.texapi.dev/v1/partner/gateway' },
                 openai: { apiKey: 'sk-openai-123', baseUrl: getProviderDefaultBaseUrl('openai') },
                 anthropic: { apiKey: 'sk-ant-999', baseUrl: getProviderDefaultBaseUrl('anthropic') },
                 gemini: { apiKey: '', baseUrl: getProviderDefaultBaseUrl('gemini') },
@@ -639,8 +640,10 @@ describe('SettingsModal', () => {
         expect(baseUrlInput.value).toBe(getProviderDefaultBaseUrl('anthropic'))
 
         fireEvent.click(screen.getByRole('button', { name: 'TexAPI' }))
-        expect((screen.getByLabelText('API Key', { selector: 'input' }) as HTMLInputElement).value).toBe('texapi-key-1')
-        expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe('https://api.texapi.dev/v1')
+        expect((screen.getByLabelText('API Key', { selector: 'input' }) as HTMLInputElement).value).toBe('')
+        expect((screen.getByLabelText('API Key', { selector: 'input' }) as HTMLInputElement).disabled).toBe(true)
+        expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe('https://api.texapi.dev/v1/partner/gateway')
+        expect((screen.getByLabelText('Base URL') as HTMLInputElement).disabled).toBe(true)
 
         fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }))
         expect((screen.getByLabelText('API Key', { selector: 'input' }) as HTMLInputElement).value).toBe('sk-openai-123')
@@ -672,7 +675,7 @@ describe('SettingsModal', () => {
         expect((screen.getByLabelText('API Key', { selector: 'input' }) as HTMLInputElement).value).toBe('anthropic-key-1')
     })
 
-    it('allows editing TexAPI base URL because the endpoint is user-managed', () => {
+    it('locks TexAPI base URL because the endpoint is server-managed', () => {
         render(
             <SettingsModal
                 isOpen={true}
@@ -685,13 +688,8 @@ describe('SettingsModal', () => {
         fireEvent.click(screen.getByRole('button', { name: 'TexAPI' }))
 
         const baseUrlInput = screen.getByLabelText('Base URL') as HTMLInputElement
-        expect(baseUrlInput.disabled).toBe(false)
-
-        fireEvent.change(baseUrlInput, {
-            target: { value: 'https://api.texapi.dev/v1' }
-        })
-
-        expect(baseUrlInput.value).toBe('https://api.texapi.dev/v1')
+        expect(baseUrlInput.disabled).toBe(true)
+        expect(baseUrlInput.value).toBe('https://api.texapi.dev/v1/partner/gateway')
     })
 
     it('supports Alibaba mode with locked default base URL', () => {
@@ -880,6 +878,47 @@ describe('SettingsModal', () => {
         expect(onClose).toHaveBeenCalledTimes(1)
         expect(logout).toHaveBeenCalledTimes(1)
         expect(showSuccess).toHaveBeenCalledWith(expect.stringMatching(/Đã đăng xuất|Signed out/))
+    })
+
+    it('wipes all local PigTex data from profile tab', async () => {
+        const onClose = vi.fn()
+        const resetLocalData = vi.fn().mockResolvedValue({
+            ok: true,
+            removedPaths: ['C:\\Users\\tester\\AppData\\Roaming\\.pigtex']
+        })
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+        const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
+
+        window.electronAPI = {
+            resetLocalData,
+        } as unknown as typeof window.electronAPI
+
+        render(
+            <SettingsModal
+                isOpen={true}
+                settings={baseSettings}
+                onClose={onClose}
+                onSave={vi.fn()}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('tab', { name: /Profile|Hồ sơ/i }))
+        fireEvent.click(screen.getByRole('button', { name: /Xóa toàn bộ data trên máy|Wipe all local data/i }))
+
+        await waitFor(() => {
+            expect(confirmSpy).toHaveBeenCalledTimes(1)
+            expect(resetLocalData).toHaveBeenCalledTimes(1)
+        })
+
+        expect(onClose).toHaveBeenCalledTimes(1)
+        expect(showSuccess).toHaveBeenCalledWith(expect.stringMatching(/Đã xóa toàn bộ dữ liệu local|All PigTex local data was removed/i))
+        const reloadTimeoutIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 150)
+        expect(reloadTimeoutIndex).toBeGreaterThanOrEqual(0)
+
+        const reloadTimeoutHandle = setTimeoutSpy.mock.results[reloadTimeoutIndex]?.value as ReturnType<typeof window.setTimeout> | undefined
+        if (reloadTimeoutHandle !== undefined) {
+            window.clearTimeout(reloadTimeoutHandle)
+        }
     })
 
     it('changes password and deletes account from profile tab', async () => {

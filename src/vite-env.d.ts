@@ -37,17 +37,16 @@ interface ElectronAPI {
             currentVersion: string
         }
         | {
-            status: 'installing'
-            currentVersion: string
-            version: string
-        }
-        | {
             status: 'opened'
             currentVersion: string
             version: string
             downloadPageUrl: string
         }
     >
+    resetLocalData: () => Promise<{
+        ok: true
+        removedPaths: string[]
+    }>
     isSecureStorageAvailable: () => boolean
     getSecureApiKeys: () => Partial<Record<'auto' | 'openai' | 'anthropic' | 'gemini' | 'alibaba', string>>
     setSecureApiKeys: (payload: Partial<Record<'auto' | 'openai' | 'anthropic' | 'gemini' | 'alibaba', string>>) => Partial<Record<'auto' | 'openai' | 'anthropic' | 'gemini' | 'alibaba', string>>

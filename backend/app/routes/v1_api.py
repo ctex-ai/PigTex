@@ -62,6 +62,7 @@ from .images import (
     save_base64_image_to_disk,
 )
 from ..search import SearchCoordinator, SearchContext
+from ..services.texapi_partner_service import TexApiPartnerService
 from ..upstream_request import UpstreamRequestConfig
 from ..provider_registry import (
     DEFAULT_PROVIDER_BASE_URLS,
@@ -80,6 +81,7 @@ router = APIRouter(
 )
 settings = get_settings()
 logger = logging.getLogger(__name__)
+TEXAPI_PARTNER_SOURCE = "texapi_partner"
 
 
 def _get_url_hostname(value: str) -> str:
@@ -484,7 +486,7 @@ class ResolvedUpstreamConfig:
     """Resolved upstream API connection config for one request."""
     api_key: str
     base_url: str
-    source: str  # request
+    source: str  # request | texapi_partner
     api_provider: str = "openai"  # resolved provider: openai | anthropic | gemini | alibaba
     db_key_id: Optional[str] = None
 
@@ -579,6 +581,73 @@ def _normalize_base_url(base_url: Optional[str], provider: str = "auto") -> str:
         default_provider = provider if provider in DEFAULT_PROVIDER_BASE_URLS else "openai"
         url = DEFAULT_PROVIDER_BASE_URLS.get(default_provider, DEFAULT_PROVIDER_BASE_URLS["openai"])
     return url.rstrip("/")
+
+
+def _should_use_texapi_partner_flow(
+    *,
+    api_key: str,
+    base_url: str,
+) -> bool:
+    service = TexApiPartnerService(settings=settings)
+    return service.is_managed_gateway_selected(base_url, api_key=api_key)
+
+
+async def _hydrate_texapi_partner_config(
+    cfg: ResolvedUpstreamConfig,
+    current_user: User,
+    *,
+    force_refresh: bool = False,
+) -> ResolvedUpstreamConfig:
+    if cfg.source != TEXAPI_PARTNER_SOURCE:
+        return cfg
+
+    service = TexApiPartnerService(settings=settings)
+    token = await service.get_delegated_token(current_user, force_refresh=force_refresh)
+    return ResolvedUpstreamConfig(
+        api_key=token.token,
+        base_url=service.gateway_base_url,
+        source=TEXAPI_PARTNER_SOURCE,
+        api_provider="openai",
+        db_key_id=None,
+    )
+
+
+def _should_retry_texapi_partner_auth_error(response: httpx.Response, cfg: ResolvedUpstreamConfig) -> bool:
+    if cfg.source != TEXAPI_PARTNER_SOURCE or response.status_code != 401:
+        return False
+
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+
+    candidates: list[str] = []
+    if isinstance(payload, dict):
+        detail = payload.get("detail")
+        if isinstance(detail, str):
+            candidates.append(detail)
+        elif isinstance(detail, dict):
+            message = detail.get("message")
+            error = detail.get("error")
+            if isinstance(message, str):
+                candidates.append(message)
+            if isinstance(error, str):
+                candidates.append(error)
+        error = payload.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "code", "type"):
+                value = error.get(key)
+                if isinstance(value, str):
+                    candidates.append(value)
+        for key in ("message", "error"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                candidates.append(value)
+
+    combined = " ".join(candidates).lower()
+    if not combined:
+        return True
+    return "expired" in combined or "invalid" in combined or "revoked" in combined
 
 
 def _normalize_public_error_message(message: str, max_length: int = 240) -> str:
@@ -1252,6 +1321,15 @@ def _resolve_upstream_config(
             db_key_id=None,
         )
 
+    if _should_use_texapi_partner_flow(api_key=resolved_key, base_url=resolved_base_url):
+        return ResolvedUpstreamConfig(
+            api_key="",
+            base_url=TexApiPartnerService(settings=settings).gateway_base_url,
+            source=TEXAPI_PARTNER_SOURCE,
+            api_provider="openai",
+            db_key_id=None,
+        )
+
     missing_msg = (
         "Missing API credentials. Provide API key via settings or headers "
         "(`X-API-Key` / `X-API-Base-URL` / `X-API-Provider`)."
@@ -1312,6 +1390,11 @@ def _build_upstream_url(cfg: ResolvedUpstreamConfig, path: str) -> str:
         return base
     if not normalized_path.startswith("/"):
         normalized_path = f"/{normalized_path}"
+
+    if cfg.source == TEXAPI_PARTNER_SOURCE and normalized_path.startswith("/v1/"):
+        normalized_path = normalized_path[3:]
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
 
     parsed = urlparse(base)
     base_segments = [seg for seg in (parsed.path or "").split("/") if seg]
@@ -5718,6 +5801,7 @@ async def v1_chat_completions(
         header_base_url=x_api_base_url,
         api_provider=x_api_provider,
     )
+    cfg = await _hydrate_texapi_partner_config(cfg, current_user)
     request.model = _require_explicit_model_id(
         request.model,
         provider=cfg.api_provider,
@@ -5938,8 +6022,10 @@ async def v1_chat_completions(
     try:
         if request.stream:
             return await _handle_streaming(
+                cfg=cfg,
                 upstream_url=upstream_url,
                 request=request,
+                current_user=current_user,
                 current_user_id=current_user_id,
                 db=db,
                 conversation_id=request.conversation_id,
@@ -5950,10 +6036,12 @@ async def v1_chat_completions(
         else:
             prep = await _prepare_chat_request()
             return await _handle_non_streaming(
+                cfg=cfg,
                 upstream_url=prep.get("upstream_url") or upstream_url,
                 request_data=prep["request_data"],
                 headers=prep["headers"],
                 request=request,
+                current_user=current_user,
                 current_user_id=current_user_id,
                 db=db,
                 coordinator=prep.get("coordinator"),
@@ -6339,6 +6427,7 @@ async def v1_list_models(
         header_base_url=x_api_base_url,
         api_provider=x_api_provider,
     )
+    cfg = await _hydrate_texapi_partner_config(cfg, current_user)
     base_url = cfg.base_url
     upstream_headers = _build_upstream_auth_headers(cfg)
     models_url = _build_upstream_models_url(cfg)
@@ -6364,6 +6453,12 @@ async def v1_list_models(
                 if response.status_code == 200:
                     _touch_legacy_key_usage(db, cfg.db_key_id)
                     return _normalize_upstream_models_payload(cfg.api_provider, response.json())
+
+                if attempt == 1 and _should_retry_texapi_partner_auth_error(response, cfg):
+                    cfg = await _hydrate_texapi_partner_config(cfg, current_user, force_refresh=True)
+                    upstream_headers = _build_upstream_auth_headers(cfg)
+                    models_url = _build_upstream_models_url(cfg)
+                    continue
 
                 if response.status_code not in {502, 503, 504} or attempt == max_attempts:
                     break
@@ -7978,10 +8073,12 @@ async def get_v1_video_generation_task(
 # =============================================================================
 
 async def _handle_streaming(
+    cfg: ResolvedUpstreamConfig,
     upstream_url: str,
     request_data: dict = None,
     headers: dict = None,
     request: V1ChatCompletionRequest = None,
+    current_user: User = None,
     current_user_id: str = "",
     db: Session = None,
     coordinator: Optional[Any] = None,
@@ -8027,7 +8124,7 @@ async def _handle_streaming(
         return "".join(parts)
 
     async def stream_generator():
-        nonlocal upstream_url, request_data, headers, coordinator, conversation_id
+        nonlocal cfg, upstream_url, request_data, headers, coordinator, conversation_id
         nonlocal resolved_search_context, resolved_web_search_enabled, resolved_memory_context_meta
         stream_started_at = perf_counter()
         first_chunk_at: Optional[float] = None
@@ -8095,6 +8192,7 @@ async def _handle_streaming(
             payload_for_stream = request_data
             current_upstream_url = upstream_url
             current_headers = dict(headers)
+            current_cfg = cfg
             for attempt in range(4):
                 async with client.stream(
                     "POST",
@@ -8104,6 +8202,19 @@ async def _handle_streaming(
                     timeout=stream_timeout,
                 ) as response:
                     if response.status_code != 200:
+                        if attempt == 0 and _should_retry_texapi_partner_auth_error(response, current_cfg):
+                            current_cfg = await _hydrate_texapi_partner_config(
+                                current_cfg,
+                                current_user,
+                                force_refresh=True,
+                            )
+                            current_headers = _build_upstream_auth_headers(current_cfg)
+                            current_upstream_url = _build_upstream_url(current_cfg, "/v1/chat/completions")
+                            headers = current_headers
+                            upstream_url = current_upstream_url
+                            cfg = current_cfg
+                            continue
+
                         error_body = await response.aread()
                         error_text = error_body.decode("utf-8", errors="replace")[:500]
                         should_retry_dashscope = (
@@ -8324,10 +8435,12 @@ async def _handle_streaming(
 
 
 async def _handle_non_streaming(
+    cfg: ResolvedUpstreamConfig,
     upstream_url: str,
     request_data: dict,
     headers: dict,
     request: V1ChatCompletionRequest,
+    current_user: User,
     current_user_id: str,
     db: Session,
     coordinator: Optional[Any] = None,
@@ -8343,6 +8456,7 @@ async def _handle_non_streaming(
     original_upstream_url = upstream_url
     original_request_data = request_data
     client = await _get_chat_client()
+    current_cfg = cfg
     result: Optional[dict] = None
     response_obj: Optional[httpx.Response] = None
     direct_memory_reply = _try_resolve_direct_memory_reply(
@@ -8379,78 +8493,89 @@ async def _handle_non_streaming(
         )
 
     if response_obj is not None and response_obj.status_code != 200:
-        error_text = (response_obj.text or "")[:500]
-        if _is_dashscope_message_shape_error(upstream_url, response_obj.status_code, error_text):
-            retry_payload = _build_dashscope_message_shape_fallback_payload(request_data)
-            if retry_payload:
-                logger.info(
-                    "Retrying non-stream request with DashScope message-shape fallback request_id=%s",
-                    request_id,
-                )
-                request_data = retry_payload
-                response_obj = await client.post(
-                    upstream_url,
-                    json=request_data,
-                    headers=headers
-                )
+        if _should_retry_texapi_partner_auth_error(response_obj, current_cfg):
+            current_cfg = await _hydrate_texapi_partner_config(current_cfg, current_user, force_refresh=True)
+            headers = _build_upstream_auth_headers(current_cfg)
+            upstream_url = _build_upstream_url(current_cfg, "/v1/chat/completions")
+            response_obj = await client.post(
+                upstream_url,
+                json=request_data,
+                headers=headers,
+            )
 
-        if response_obj.status_code != 200:
+        if response_obj is not None and response_obj.status_code != 200:
             error_text = (response_obj.text or "")[:500]
-            model_id = str((request_data or {}).get("model") or "")
-
-            if _is_dashscope_upstream_url(upstream_url) and _is_dashscope_stream_only_error(error_text):
-                stream_collected = await _collect_dashscope_stream_as_nonstream_response(
-                    client=client,
-                    upstream_url=upstream_url,
-                    request_data=request_data,
-                    headers=headers,
-                    model_id=model_id,
-                )
-                if stream_collected:
+            if _is_dashscope_message_shape_error(upstream_url, response_obj.status_code, error_text):
+                retry_payload = _build_dashscope_message_shape_fallback_payload(request_data)
+                if retry_payload:
                     logger.info(
-                        "Recovered non-stream request via stream collection fallback request_id=%s model=%s",
+                        "Retrying non-stream request with DashScope message-shape fallback request_id=%s",
                         request_id,
-                        model_id,
                     )
-                    result = stream_collected
+                    request_data = retry_payload
+                    response_obj = await client.post(
+                        upstream_url,
+                        json=request_data,
+                        headers=headers
+                    )
 
-            if (
-                result is None
-                and _is_dashscope_upstream_url(upstream_url)
-                and _is_dashscope_capability_error(response_obj.status_code, error_text)
-            ):
-                native_fallback = _build_dashscope_native_chat_fallback(
-                    upstream_url=upstream_url,
-                    request_data=request_data,
-                    stream=False,
-                )
-                if native_fallback:
-                    native_url, native_payload, native_extra_headers = native_fallback
-                    native_headers = dict(headers)
-                    native_headers.update(native_extra_headers)
-                    native_headers["Content-Type"] = "application/json"
-                    logger.info(
-                        "Retrying non-stream with DashScope native fallback request_id=%s model=%s",
-                        request_id,
-                        model_id,
-                    )
-                    native_response = await client.post(
-                        native_url,
-                        json=native_payload,
-                        headers=native_headers,
-                    )
-                    if native_response.status_code == 200:
-                        response_obj = native_response
-                        upstream_url = native_url
-                        request_data = native_payload
-                    else:
-                        response_obj = native_response
-                        error_text = (response_obj.text or "")[:500]
+            if response_obj.status_code != 200:
+                error_text = (response_obj.text or "")[:500]
+                model_id = str((request_data or {}).get("model") or "")
 
-            if result is None and response_obj.status_code != 200:
-                request_data = original_request_data
-                upstream_url = original_upstream_url
-                _raise_upstream_http_exception(response_obj, "chat.completions")
+                if _is_dashscope_upstream_url(upstream_url) and _is_dashscope_stream_only_error(error_text):
+                    stream_collected = await _collect_dashscope_stream_as_nonstream_response(
+                        client=client,
+                        upstream_url=upstream_url,
+                        request_data=request_data,
+                        headers=headers,
+                        model_id=model_id,
+                    )
+                    if stream_collected:
+                        logger.info(
+                            "Recovered non-stream request via stream collection fallback request_id=%s model=%s",
+                            request_id,
+                            model_id,
+                        )
+                        result = stream_collected
+
+                if (
+                    result is None
+                    and _is_dashscope_upstream_url(upstream_url)
+                    and _is_dashscope_capability_error(response_obj.status_code, error_text)
+                ):
+                    native_fallback = _build_dashscope_native_chat_fallback(
+                        upstream_url=upstream_url,
+                        request_data=request_data,
+                        stream=False,
+                    )
+                    if native_fallback:
+                        native_url, native_payload, native_extra_headers = native_fallback
+                        native_headers = dict(headers)
+                        native_headers.update(native_extra_headers)
+                        native_headers["Content-Type"] = "application/json"
+                        logger.info(
+                            "Retrying non-stream with DashScope native fallback request_id=%s model=%s",
+                            request_id,
+                            model_id,
+                        )
+                        native_response = await client.post(
+                            native_url,
+                            json=native_payload,
+                            headers=native_headers,
+                        )
+                        if native_response.status_code == 200:
+                            response_obj = native_response
+                            upstream_url = native_url
+                            request_data = native_payload
+                        else:
+                            response_obj = native_response
+                            error_text = (response_obj.text or "")[:500]
+
+                if result is None and response_obj.status_code != 200:
+                    request_data = original_request_data
+                    upstream_url = original_upstream_url
+                    _raise_upstream_http_exception(response_obj, "chat.completions")
 
     if result is None and response_obj is not None:
         result = response_obj.json()

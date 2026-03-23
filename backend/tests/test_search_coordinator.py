@@ -49,6 +49,27 @@ class SearchCoordinatorTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_run_warns_when_search_provider_times_out(self) -> None:
+        coordinator = SearchCoordinator(Settings(web_search_tavily_api_key="test-key", redis_url=""))
+        coordinator._search_query_timeout_seconds = 0.05
+
+        async def hanging_search(*args, **kwargs):
+            await asyncio.sleep(60)
+            return []
+
+        coordinator.search_broker.search = hanging_search  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="OpenAI latest news today",
+                force=True,
+                mode="realtime",
+            )
+            self.assertEqual(context.raw_results_count, 0)
+            self.assertTrue(any("timed out" in warning.lower() for warning in context.warnings))
+
+        asyncio.run(scenario())
+
     def test_infer_preferred_domains_detects_known_official_domains_when_context_requires_it(self) -> None:
         coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
 
@@ -88,6 +109,22 @@ class SearchCoordinatorTests(unittest.TestCase):
 
         self.assertEqual(domains[0], "reddit.com")
 
+    def test_provider_chain_prefers_tavily_before_ddg(self) -> None:
+        coordinator = SearchCoordinator(
+            Settings(
+                redis_url="",
+                web_search_tavily_api_key="tavily-key",
+                web_search_duckduckgo_enabled=True,
+            )
+        )
+
+        provider_names = [name for name, _ in coordinator.search_broker.providers]
+
+        self.assertEqual(
+            provider_names[:2],
+            ["tavily", "duckduckgo"],
+        )
+
     def test_plan_queries_skips_official_query_when_not_requested(self) -> None:
         coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
 
@@ -100,6 +137,77 @@ class SearchCoordinatorTests(unittest.TestCase):
         )
 
         self.assertFalse(any("official source" in item.query for item in queries))
+
+    def test_price_queries_use_general_topic_and_price_variants(self) -> None:
+        coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
+
+        queries = coordinator._plan_queries(
+            "Giá vàng hôm nay bao nhiêu?",
+            intent=SearchIntent.REALTIME_INFO,
+            mode=SearchMode.REALTIME,
+            preferred_domains=[],
+            needs_official_sources=False,
+        )
+
+        self.assertEqual(queries[0].topic, "general")
+        self.assertTrue(any(item.topic == "news" for item in queries))
+        self.assertTrue(any("cập nhật giá" in item.query for item in queries))
+
+    def test_price_query_guidance_and_fact_focus_are_numeric(self) -> None:
+        coordinator = SearchCoordinator(Settings(web_search_tavily_api_key="test-key", redis_url=""))
+
+        async def fake_search(*args, **kwargs):
+            return [
+                SearchResult(
+                    title="Gold Market Snapshot",
+                    url="https://example.com/gold",
+                    snippet=(
+                        "Market commentary stayed mixed today. "
+                        "Spot gold traded at 2,351 USD/oz on 2026-03-23, up 0.4% from yesterday."
+                    ),
+                    relevance_score=0.8,
+                    source_provider="tavily",
+                    published_at="2026-03-23",
+                )
+            ]
+
+        async def fake_read(url: str):
+            return SearchResult(
+                title="Gold Market Snapshot",
+                url=url,
+                snippet="Spot gold traded at 2,351 USD/oz on 2026-03-23.",
+                full_content=(
+                    "Opening summary.\n"
+                    "Spot gold traded at 2,351 USD/oz on 2026-03-23 in London.\n"
+                    "Analysts expect moderate volatility."
+                ),
+                relevance_score=0.9,
+                source_provider="browser_subagent",
+                published_at="2026-03-23",
+            )
+
+        async def fake_jina_read(url: str):
+            return (
+                "Opening summary.\n"
+                "Spot gold traded at 2,351 USD/oz on 2026-03-23 in London.\n"
+                "Analysts expect moderate volatility."
+            )
+
+        coordinator.search_broker.search = fake_search  # type: ignore[assignment]
+        coordinator.browser_subagent_provider.read = fake_read  # type: ignore[assignment]
+        coordinator.jina_reader.read = fake_jina_read  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="Giá vàng hôm nay bao nhiêu?",
+                force=True,
+                mode="auto",
+            )
+            self.assertEqual(context.query_focus, "price")
+            self.assertTrue(any("exact number" in item for item in context.answer_guidance))
+            self.assertIn("2,351 USD/oz", context.facts[0])
+
+        asyncio.run(scenario())
 
     def test_url_read_uses_github_reader_and_preserves_code_formatting(self) -> None:
         coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
@@ -154,6 +262,61 @@ class SearchCoordinatorTests(unittest.TestCase):
             )
             self.assertEqual(context.citations[0]["source_provider"], "jina_reader")
             self.assertTrue(any("Structured GitHub read was unavailable" in warning for warning in context.warnings))
+
+        asyncio.run(scenario())
+
+    def test_url_read_uses_browser_subagent_when_generic_reader_returns_dynamic_shell(self) -> None:
+        coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
+
+        async def fake_github_read(url: str) -> SearchResult | None:
+            return None
+
+        async def fake_jina_read(url: str) -> str:
+            return "Enable JavaScript to run this app."
+
+        async def fake_browser_read(url: str) -> SearchResult | None:
+            return SearchResult(
+                title="Dynamic article",
+                url=url,
+                snippet="Rendered article body",
+                full_content="Rendered article body with the real page content.",
+                source_provider="browser_subagent",
+                domain="example.com",
+            )
+
+        coordinator.github_reader.read = fake_github_read  # type: ignore[assignment]
+        coordinator.jina_reader.read = fake_jina_read  # type: ignore[assignment]
+        coordinator.browser_subagent_provider.read = fake_browser_read  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            context = await coordinator.run(
+                user_message="Read this page https://example.com/dynamic-app",
+                force=True,
+                mode="url_read",
+            )
+            self.assertEqual(context.citations[0]["source_provider"], "browser_subagent")
+            self.assertIn("Rendered article body", context.facts[0])
+
+        asyncio.run(scenario())
+
+    def test_search_web_tool_uses_search_broker(self) -> None:
+        coordinator = SearchCoordinator(Settings(redis_url="", web_search_duckduckgo_enabled=False))
+
+        async def fake_search(*args, **kwargs):
+            return [
+                SearchResult(
+                    title="OpenAI update",
+                    url="https://example.com/openai-update",
+                    snippet="OpenAI released an update.",
+                )
+            ]
+
+        coordinator.search_broker.search = fake_search  # type: ignore[assignment]
+
+        async def scenario() -> None:
+            results = await coordinator.search_web("OpenAI latest update")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].title, "OpenAI update")
 
         asyncio.run(scenario())
 

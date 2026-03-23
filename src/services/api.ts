@@ -2223,6 +2223,14 @@ export type ModelCapability =
     | 'audio_speech'
     | 'video_generation'
     | 'moderation';
+export type AIModelFlagTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
+
+export interface AIModelProviderFlag {
+    label: string;
+    code?: string | null;
+    tone?: AIModelFlagTone;
+    disabled?: boolean;
+}
 
 export interface AIModel {
     id: string;
@@ -2239,6 +2247,8 @@ export interface AIModel {
     description: string | null;
     priority: number;
     is_active: boolean;
+    recommendation_flag?: AIModelProviderFlag | null;
+    status_flag?: AIModelProviderFlag | null;
 }
 
 // Keep only the latest successfully fetched catalog for capability helpers.
@@ -2258,6 +2268,8 @@ interface V1ModelListResponse {
         supports_vision?: boolean;
         max_output?: number;
         tier?: string;
+        recommendation_flag?: unknown;
+        status_flag?: unknown;
     }[];
 }
 
@@ -2277,6 +2289,47 @@ function normalizeModelCapability(value: unknown): ModelCapability | null {
         || normalized === 'moderation'
         ? normalized
         : null;
+}
+
+function normalizeAIModelFlagTone(value: unknown): AIModelFlagTone | undefined {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'neutral'
+        || normalized === 'accent'
+        || normalized === 'success'
+        || normalized === 'warning'
+        || normalized === 'danger'
+        ? normalized
+        : undefined;
+}
+
+function mapRawModelProviderFlag(value: unknown): AIModelProviderFlag | null {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const raw = value as {
+        label?: unknown;
+        code?: unknown;
+        tone?: unknown;
+        disabled?: unknown;
+    };
+    const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+    if (!label) {
+        return null;
+    }
+
+    const code = typeof raw.code === 'string' && raw.code.trim()
+        ? raw.code.trim()
+        : null;
+    const tone = normalizeAIModelFlagTone(raw.tone);
+    const disabled = typeof raw.disabled === 'boolean' ? raw.disabled : undefined;
+    return {
+        label,
+        code,
+        tone,
+        disabled,
+    };
 }
 
 const TRANSPORT_STANDARD_CAPABILITIES: Record<ApiEndpointProviderId, ModelCapability[]> = {
@@ -2376,6 +2429,8 @@ function mapV1ModelToAIModel(model: {
     supports_vision?: boolean;
     max_output?: number;
     tier?: string;
+    recommendation_flag?: unknown;
+    status_flag?: unknown;
 }): AIModel {
     const transport = isKnownEndpointProvider(model.transport) ? model.transport : undefined;
     const explicitCapabilities = Array.isArray(model.capabilities)
@@ -2397,7 +2452,9 @@ function mapV1ModelToAIModel(model: {
         max_tokens: model.max_output ?? 8192,
         description: model.description || null,
         priority: 100,
-        is_active: true
+        is_active: true,
+        recommendation_flag: mapRawModelProviderFlag(model.recommendation_flag),
+        status_flag: mapRawModelProviderFlag(model.status_flag)
     };
     mapped.capabilities = explicitCapabilities.length > 0
         ? explicitCapabilities
@@ -3142,6 +3199,15 @@ export interface DocumentAttachment {
     extracted_text: string;
     text_chars: number;
     truncated: boolean;
+    chunks?: DocumentAttachmentChunk[];
+}
+
+export interface DocumentAttachmentChunk {
+    index: number;
+    label?: string | null;
+    text: string;
+    char_count: number;
+    truncated?: boolean;
 }
 
 export interface FileUploadResult {

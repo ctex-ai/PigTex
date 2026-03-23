@@ -10,35 +10,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background:
-        radial-gradient(circle at top left, rgba(235, 117, 42, 0.20), transparent 34%),
-        radial-gradient(circle at bottom right, rgba(15, 118, 110, 0.18), transparent 30%),
-        linear-gradient(145deg, #f5efe7 0%, #eef4fb 48%, #f5f9f3 100%);
+    background: #e8edf6;
     position: relative;
     overflow: hidden;
     font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
-.auth-bg-layer {
+.auth-bg-video {
     position: absolute;
     inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
     z-index: 0;
     pointer-events: none;
-}
-
-.auth-bg-layer-primary {
-    background:
-        radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.72), transparent 0 22%),
-        radial-gradient(circle at 82% 22%, rgba(255, 248, 232, 0.72), transparent 0 18%),
-        radial-gradient(circle at 28% 82%, rgba(236, 253, 245, 0.78), transparent 0 20%);
-}
-
-.auth-bg-layer-secondary {
-    background-image:
-        linear-gradient(rgba(15, 23, 42, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
-    background-size: 40px 40px;
-    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 88%);
 }
 
 .auth-page::before {
@@ -307,30 +293,35 @@
 
 /* === OAuth Divider === */
 .auth-divider {
-    position: relative;
-    margin: 6px 0 2px;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px 0 4px;
+    color: #6b7280;
 }
 
-.auth-divider::before {
+.auth-divider::before,
+.auth-divider::after {
     content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
+    flex: 1 1 0;
     height: 1px;
-    background: rgba(17, 24, 39, 0.12);
+    background: linear-gradient(
+        90deg,
+        rgba(15, 23, 42, 0.04) 0%,
+        rgba(15, 23, 42, 0.14) 50%,
+        rgba(15, 23, 42, 0.04) 100%
+    );
 }
 
 .auth-divider span {
-    position: relative;
-    display: inline-block;
-    padding: 0 10px;
-    background: rgba(255, 255, 255, 0.88);
-    color: #6b7280;
+    flex: 0 0 auto;
+    padding: 0;
+    background: transparent;
+    color: inherit;
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+    line-height: 1;
 }
 
 .auth-social-grid {

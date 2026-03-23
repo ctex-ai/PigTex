@@ -32,6 +32,7 @@ from .models import (
     SearchResult,
 )
 from .providers.broker import SearchBroker
+from .providers.browser_subagent import BrowserSubagentProvider
 from .providers.duckduckgo import DuckDuckGoSearchProvider
 from .providers.github_reader import GitHubReaderProvider
 from .providers.jina_reader import JinaReaderProvider
@@ -45,6 +46,10 @@ try:
 except Exception:  # pragma: no cover - optional dependency runtime guard
     redis_async = None
     REDIS_AVAILABLE = False
+
+
+class SearchQueryTimeoutError(TimeoutError):
+    """Raised when a single search query exceeds its timeout budget."""
 
 
 class SearchCoordinator:
@@ -71,7 +76,17 @@ class SearchCoordinator:
         "moi nhat",
         "hôm nay",
         "tin tuc",
+        "giá",
         "gia",
+        "bao nhiêu",
+        "bao nhieu",
+        "how much",
+        "cost",
+        "pricing",
+        "phi",
+        "phí",
+        "tỷ giá",
+        "ty gia",
     )
     FACTUAL_HINTS = (
         "fact check",
@@ -168,6 +183,16 @@ class SearchCoordinator:
         "hướng dẫn",
         "đặc tả",
     )
+    BROWSER_FALLBACK_HINTS = (
+        "enable javascript",
+        "javascript is required",
+        "please turn javascript on",
+        "loading...",
+        "just a moment",
+        "access denied",
+        "verify you are human",
+        "captcha",
+    )
     OFFICIAL_DOMAIN_HINTS = {
         "openai": ("openai.com",),
         "anthropic": ("anthropic.com",),
@@ -186,6 +211,18 @@ class SearchCoordinator:
         "community": ("reddit.com", "news.ycombinator.com"),
         "troubleshooting": ("stackoverflow.com", "github.com", "reddit.com"),
     }
+    PRICE_QUERY_RE = re.compile(
+        r"(?i)(?:\b(?:price|pricing|cost|quote|quoted|rate|fee|fees|how much|bao nhieu|gia|phi|ty gia)\b|giá|phí|tỷ giá)"
+    )
+    VIETNAMESE_QUERY_RE = re.compile(
+        r"[ăâđêôơưĂÂĐÊÔƠƯ"
+        r"áàảãạấầẩẫậắằẳẵặ"
+        r"éèẻẽẹếềểễệ"
+        r"íìỉĩị"
+        r"óòỏõọốồổỗộớờởỡợ"
+        r"úùủũụứừửữự"
+        r"ýỳỷỹỵ]"
+    )
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -202,6 +239,10 @@ class SearchCoordinator:
             800,
             min(12_000, int(getattr(settings, "web_search_url_read_max_snippet_chars", 4200) or 4200)),
         )
+        self._browser_min_content_chars = max(
+            300,
+            min(4_000, int(getattr(settings, "web_search_browser_min_content_chars", 1200) or 1200)),
+        )
 
         self._redis_cache_prefix = str(
             getattr(settings, "web_search_cache_key_prefix", "pigtex:websearch:cache")
@@ -213,6 +254,7 @@ class SearchCoordinator:
         )
 
         timeout_seconds = max(3.0, float(getattr(settings, "web_search_timeout_seconds", 12.0) or 12.0))
+        self._search_query_timeout_seconds = timeout_seconds + 1.0
         tavily_endpoint = getattr(settings, "web_search_tavily_endpoint", "https://api.tavily.com/search")
         tavily_api_key = getattr(settings, "web_search_tavily_api_key", "")
         provider_order = str(getattr(settings, "web_search_provider_order", "tavily,duckduckgo") or "tavily,duckduckgo")
@@ -227,7 +269,8 @@ class SearchCoordinator:
             enabled=bool(getattr(settings, "web_search_duckduckgo_enabled", True)),
             region=str(getattr(settings, "web_search_duckduckgo_region", "us-en") or "us-en"),
             safesearch=str(getattr(settings, "web_search_duckduckgo_safesearch", "moderate") or "moderate"),
-            backend=str(getattr(settings, "web_search_duckduckgo_backend", "html") or "html"),
+            backend=str(getattr(settings, "web_search_duckduckgo_backend", "auto") or "auto"),
+            timeout_seconds=timeout_seconds,
         )
         self.github_reader = GitHubReaderProvider(
             enabled=bool(getattr(settings, "web_search_github_enabled", True)),
@@ -242,9 +285,14 @@ class SearchCoordinator:
             endpoint=jina_endpoint,
             timeout_seconds=timeout_seconds + 4.0,
         )
+        self.browser_subagent_provider = BrowserSubagentProvider(
+            enabled=bool(getattr(settings, "web_search_browser_enabled", True)),
+            timeout_seconds=float(getattr(settings, "web_search_browser_timeout_seconds", timeout_seconds + 8.0) or (timeout_seconds + 8.0)),
+            max_content_chars=int(getattr(settings, "web_search_browser_max_content_chars", 20_000) or 20_000),
+        )
         self.search_broker = SearchBroker(
             providers=self._build_provider_chain(provider_order),
-            min_results_to_stop=3,
+            min_results_to_stop=4,
         )
 
         self._cache: Dict[str, Tuple[float, List[SearchResult]]] = {}
@@ -388,6 +436,16 @@ class SearchCoordinator:
             official_domains=official_domains,
         )
 
+        price_query = self._is_price_query(text)
+        if price_query:
+            context.query_focus = "price"
+            context.answer_guidance = [
+                "If the user asks for price, fee, cost, or rate, answer with the exact number when the evidence supports it.",
+                "If sources disagree, return the tightest defensible range and name the source/date for each number.",
+                "Always include currency plus the observed date, time, market, or region when the source provides it.",
+                "Do not use vague wording such as 'khá cao' or 'dao động' without numbers.",
+            ]
+
         should_search = force or intent != SearchIntent.NO_SEARCH or resolved_mode != SearchMode.AUTO
         if not should_search:
             context.total_search_time_ms = int((perf_counter() - started_at) * 1000)
@@ -410,6 +468,7 @@ class SearchCoordinator:
                 max_snippet_chars=self._url_read_chars_per_result(ranked_url_results),
                 preferred_domains=preferred_domains,
                 preserve_formatting=True,
+                focus="price" if price_query else None,
             )
             context.facts = facts
             context.citations = citations
@@ -464,8 +523,14 @@ class SearchCoordinator:
         task_outputs = await asyncio.gather(*query_tasks, return_exceptions=True)
 
         all_results: List[SearchResult] = []
+        timeout_warning_added = False
         for query, output in zip(planned_queries, task_outputs):
             if isinstance(output, Exception):
+                if isinstance(output, SearchQueryTimeoutError) and not timeout_warning_added:
+                    context.warnings.append(
+                        "Web search timed out before all live sources were fetched. PigTex continued with partial or empty results."
+                    )
+                    timeout_warning_added = True
                 logger.warning("Search query failed query=%s error=%s", query.query, output)
                 continue
             all_results.extend(output)
@@ -476,6 +541,7 @@ class SearchCoordinator:
 
         should_deep_read = (
             deep_read
+            or price_query
             or resolved_mode in (SearchMode.DEEP_VERIFY, SearchMode.URL_READ)
             or intent == SearchIntent.DEEP_RESEARCH
         )
@@ -492,6 +558,7 @@ class SearchCoordinator:
             max_facts=max(limit + 1, 6),
             mode=resolved_mode,
             preferred_domains=preferred_domains,
+            focus="price" if price_query else None,
         )
 
         context.facts = facts
@@ -619,10 +686,24 @@ class SearchCoordinator:
             "No observed real-world data exists yet for that date."
         )
 
-    def _query_topic_for_intent(self, intent: SearchIntent, mode: SearchMode) -> str:
+    def _query_topic_for_intent(self, text: str, intent: SearchIntent, mode: SearchMode) -> str:
+        if self._is_price_query(text):
+            return "general"
         if mode == SearchMode.REALTIME:
             return "news"
         return "news" if intent == SearchIntent.REALTIME_INFO else "general"
+
+    def _is_price_query(self, text: str) -> bool:
+        return bool(self.PRICE_QUERY_RE.search((text or "").strip()))
+
+    def _looks_vietnamese_query(self, text: str) -> bool:
+        normalized = (text or "").strip().lower()
+        if self.VIETNAMESE_QUERY_RE.search(normalized):
+            return True
+        return any(
+            hint in normalized
+            for hint in (" hôm nay", " hom nay", " bao nhiêu", " bao nhieu", " giá", " phí", " tỷ giá", " tỉ giá")
+        )
 
     def _contains_any_hint(self, text: str, hints: Sequence[str]) -> bool:
         normalized = (text or "").lower()
@@ -760,11 +841,65 @@ class SearchCoordinator:
         if not base:
             return []
 
+        price_query = self._is_price_query(base)
+        base_topic = self._query_topic_for_intent(base, intent, mode)
         candidates: List[SearchQuery] = [
-            SearchQuery(query=base, topic=self._query_topic_for_intent(intent, mode), priority=1),
+            SearchQuery(
+                query=base,
+                topic=base_topic,
+                priority=1,
+                freshness_days=7 if price_query and mode == SearchMode.REALTIME else None,
+            ),
         ]
 
-        if mode == SearchMode.REALTIME or intent == SearchIntent.REALTIME_INFO:
+        if price_query:
+            lowered = base.lower()
+            is_vietnamese = self._looks_vietnamese_query(base)
+            if "hôm nay" not in lowered and "hom nay" not in lowered and "today" not in lowered and "current" not in lowered:
+                candidates.append(
+                    SearchQuery(
+                        query=f"{base} {'hôm nay' if is_vietnamese else 'today'}",
+                        topic="general",
+                        priority=2,
+                        freshness_days=7,
+                    )
+                )
+            if "giá" not in lowered and re.search(r"\bgia\b", lowered) is None and "price" not in lowered:
+                candidates.append(
+                    SearchQuery(
+                        query=f"{base} {'giá' if is_vietnamese else 'price'}",
+                        topic="general",
+                        priority=3,
+                        freshness_days=30,
+                    )
+                )
+            candidates.append(
+                SearchQuery(
+                    query=f"{base} {'cập nhật giá' if is_vietnamese else 'latest price update'}",
+                    topic="news",
+                    priority=4,
+                    freshness_days=7,
+                )
+            )
+            if needs_official_sources:
+                candidates.append(
+                    SearchQuery(
+                        query=f"{base} {'giá chính thức' if is_vietnamese else 'official price'}",
+                        topic="general",
+                        priority=5,
+                        freshness_days=30,
+                    )
+                )
+            for index, domain in enumerate((preferred_domains or [])[:3], start=1):
+                candidates.append(
+                    SearchQuery(
+                        query=f"{base} site:{domain}",
+                        topic="general",
+                        priority=5 + index,
+                        freshness_days=30,
+                    )
+                )
+        elif mode == SearchMode.REALTIME or intent == SearchIntent.REALTIME_INFO:
             candidates.append(
                 SearchQuery(
                     query=f"{base} latest update",
@@ -914,14 +1049,53 @@ class SearchCoordinator:
             logger.warning("Web search rate limit reached. query=%s", query.query)
             return []
 
-        results = await self.search_broker.search(
-            query=query.query,
-            topic=topic,
-            max_results=max_results,
-            freshness_days=query.freshness_days,
-        )
+        try:
+            results = await asyncio.wait_for(
+                self.search_broker.search(
+                    query=query.query,
+                    topic=topic,
+                    max_results=max_results,
+                    freshness_days=query.freshness_days,
+                ),
+                timeout=self._search_query_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Web search query timed out query=%s timeout_seconds=%s",
+                query.query,
+                self._search_query_timeout_seconds,
+            )
+            raise SearchQueryTimeoutError(query.query) from None
         await self._cache_set(cache_key, results)
         return self._clone_results(results)
+
+    async def search_web(
+        self,
+        query: str,
+        *,
+        topic: str = "general",
+        max_results: int | None = None,
+        freshness_days: int | None = None,
+    ) -> List[SearchResult]:
+        normalized_query = (query or "").strip()
+        if not normalized_query:
+            return []
+
+        limit = max(1, min(10, int(max_results or self._default_max_results)))
+        return await self._search_query(
+            SearchQuery(
+                query=normalized_query,
+                topic=topic,
+                freshness_days=freshness_days,
+            ),
+            max_results=limit,
+        )
+
+    async def read_url_content(self, url: str) -> SearchResult | None:
+        return await self._read_url(url)
+
+    async def browser_subagent(self, url: str) -> SearchResult | None:
+        return await self.browser_subagent_provider.read(url)
 
     async def _cache_get(self, key: str) -> List[SearchResult] | None:
         if self._redis is not None:
@@ -988,7 +1162,7 @@ class SearchCoordinator:
             return True
 
     async def _run_url_reads(self, urls: List[str]) -> List[SearchResult]:
-        tasks = [asyncio.create_task(self._read_url(url)) for url in urls[: self._max_deep_reads]]
+        tasks = [asyncio.create_task(self.read_url_content(url)) for url in urls[: self._max_deep_reads]]
         if not tasks:
             return []
         outputs = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1011,7 +1185,7 @@ class SearchCoordinator:
 
         async def _deep_read(result: SearchResult) -> None:
             async with semaphore:
-                enriched = await self._read_url(result.url)
+                enriched = await self.read_url_content(result.url)
                 if not enriched:
                     return
                 result.full_content = enriched.full_content or enriched.snippet
@@ -1080,6 +1254,31 @@ class SearchCoordinator:
         count = max(1, len(results))
         return max(900, min(self._url_read_max_snippet_chars, self._url_read_max_snippet_chars // count))
 
+    def _build_url_read_result(self, url: str, content: str, source_provider: str) -> SearchResult:
+        parsed = urlparse(url)
+        title = parsed.netloc or url
+        for line in content.splitlines():
+            candidate = line.strip().strip("#").strip()
+            if len(candidate) >= 8:
+                title = candidate[:140]
+                break
+        return SearchResult(
+            title=title,
+            url=url,
+            snippet=content[:400],
+            full_content=content,
+            source_provider=source_provider,
+            domain=(parsed.netloc or "").replace("www.", ""),
+        )
+
+    def _should_browser_fallback(self, content: str) -> bool:
+        normalized = " ".join((content or "").lower().split())
+        if not normalized:
+            return True
+        if len(normalized) < self._browser_min_content_chars:
+            return True
+        return any(hint in normalized for hint in self.BROWSER_FALLBACK_HINTS)
+
     async def _read_url(self, url: str) -> SearchResult | None:
         normalized_url = (url or "").strip()
         if not normalized_url:
@@ -1091,20 +1290,12 @@ class SearchCoordinator:
                 return github_result
 
         content = await self.jina_reader.read(normalized_url)
+        browser_result: SearchResult | None = None
+        if not content or self._should_browser_fallback(content):
+            browser_result = await self.browser_subagent(normalized_url)
+            if browser_result:
+                return browser_result
+
         if not content:
             return None
-        parsed = urlparse(normalized_url)
-        title = parsed.netloc or normalized_url
-        for line in content.splitlines():
-            candidate = line.strip().strip("#").strip()
-            if len(candidate) >= 8:
-                title = candidate[:140]
-                break
-        return SearchResult(
-            title=title,
-            url=normalized_url,
-            snippet=content[:400],
-            full_content=content,
-            source_provider="jina_reader",
-            domain=(parsed.netloc or "").replace("www.", ""),
-        )
+        return self._build_url_read_result(normalized_url, content, "jina_reader")

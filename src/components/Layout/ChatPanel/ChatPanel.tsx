@@ -31,6 +31,7 @@ import {
     getModels,
     getModelsWithCredentials,
     AIModel,
+    AIModelProviderFlag,
     ApiConnectivityIssue,
     diagnoseApiConnectivityIssue,
     streamSmartChat,
@@ -118,6 +119,7 @@ const ALLOWED_FILE_EXTENSIONS = ['.txt', '.md', '.markdown', '.pdf', '.docx']
 const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
 const MAX_FILES = 5
 const MAX_PASTED_CODE_CHARS = 120000
+const MODEL_SHORTLIST_LIMIT = 5
 
 // Regex to match ![alt](url) markdown image references
 const IMAGE_REF_REGEX = /!\[([^\]]*)\]\(([^)]+)\)/g
@@ -1042,7 +1044,14 @@ function buildPastedCodeAttachment(rawCode: string): DocumentAttachment {
         size,
         extracted_text: finalCode,
         text_chars: finalCode.length,
-        truncated: trimmed.length > MAX_PASTED_CODE_CHARS
+        truncated: trimmed.length > MAX_PASTED_CODE_CHARS,
+        chunks: [{
+            index: 1,
+            label: 'Snippet',
+            text: finalCode,
+            char_count: finalCode.length,
+            truncated: trimmed.length > MAX_PASTED_CODE_CHARS
+        }]
     }
 }
 
@@ -1426,12 +1435,6 @@ const USAGE_MODEL_RATE_HINTS: UsageModelRateHint[] = [
 
 const DEFAULT_USAGE_INPUT_USD_PER_1M = 0.15
 const DEFAULT_USAGE_OUTPUT_USD_PER_1M = 0.6
-const TOKEN_NUMBER_FORMATTER = new Intl.NumberFormat('en-US')
-const COST_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 6
-})
-
 const resolveModelUsageRates = (modelId?: string | null) => {
     const normalized = (modelId || '').trim().toLowerCase()
     const matched = USAGE_MODEL_RATE_HINTS.find(rate => normalized.includes(rate.hint))
@@ -1514,12 +1517,6 @@ const buildStoredAssistantUsage = (
         estimated: true
     }
 }
-
-const formatUsageTokenLabel = (usage: MessageUsageMeta) =>
-    `${TOKEN_NUMBER_FORMATTER.format(Math.max(0, usage.totalTokens))} tok`
-
-const formatUsageCostLabel = (usage: MessageUsageMeta) =>
-    `$${COST_NUMBER_FORMATTER.format(Math.max(0, usage.costUsd ?? 0))}`
 
 const buildModeRuntimeInstruction = (
     modeId: ConversationModeId,
@@ -1771,7 +1768,8 @@ const buildStoredMessageContent = (
 interface DisplayModel {
     id: string
     label: string
-    badge: string | null
+    badges: DisplayModelFlag[]
+    disabled: boolean
     type?: AIModel['type']
     transport?: AIModel['transport']
     provider?: AIModel['provider']
@@ -1779,6 +1777,112 @@ interface DisplayModel {
     supports_vision?: AIModel['supports_vision']
     capabilities?: AIModel['capabilities']
 }
+
+interface DisplayModelFlag extends AIModelProviderFlag {
+    kind: 'recommendation' | 'status'
+}
+
+const buildFallbackDisplayModel = (modelId: string): DisplayModel => ({
+    id: modelId,
+    label: modelId,
+    badges: [],
+    disabled: false
+})
+
+const normalizeDisplayModelFlag = (
+    kind: DisplayModelFlag['kind'],
+    flag?: AIModelProviderFlag | null
+): DisplayModelFlag | null => {
+    const label = (flag?.label || '').trim()
+    if (!label) return null
+
+    const code = typeof flag?.code === 'string' && flag.code.trim()
+        ? flag.code.trim()
+        : undefined
+    return {
+        kind,
+        label,
+        code,
+        tone: flag?.tone ?? (kind === 'recommendation' ? 'accent' : undefined),
+        disabled: flag?.disabled === true
+    }
+}
+
+const getDisplayModelFlags = (
+    model: Pick<AIModel, 'recommendation_flag' | 'status_flag'>
+): DisplayModelFlag[] => {
+    const flags = [
+        normalizeDisplayModelFlag('recommendation', model.recommendation_flag),
+        normalizeDisplayModelFlag('status', model.status_flag)
+    ].filter((flag): flag is DisplayModelFlag => flag !== null)
+    return flags.slice(0, 2)
+}
+
+const getDisplayModelFlagSummary = (model: Pick<DisplayModel, 'badges'>): string | null => {
+    if (!model.badges.length) return null
+    return model.badges.map(flag => flag.label).join(' • ')
+}
+
+const hasRecommendationDisplayFlag = (model: Pick<DisplayModel, 'badges'>): boolean =>
+    model.badges.some(flag => flag.kind === 'recommendation')
+
+const buildModelShortlist = (models: DisplayModel[], selectedModelId: string): DisplayModel[] => {
+    if (models.length <= MODEL_SHORTLIST_LIMIT) {
+        return models
+    }
+
+    const shortlist: DisplayModel[] = []
+    const seen = new Set<string>()
+    const pushModel = (model: DisplayModel) => {
+        if (seen.has(model.id)) return
+        shortlist.push(model)
+        seen.add(model.id)
+    }
+
+    models
+        .filter(model => !model.disabled && hasRecommendationDisplayFlag(model))
+        .forEach(model => {
+            if (shortlist.length < MODEL_SHORTLIST_LIMIT) {
+                pushModel(model)
+            }
+        })
+
+    models
+        .filter(model => !model.disabled)
+        .forEach(model => {
+            if (shortlist.length < MODEL_SHORTLIST_LIMIT) {
+                pushModel(model)
+            }
+        })
+
+    models.forEach(model => {
+        if (shortlist.length < MODEL_SHORTLIST_LIMIT) {
+            pushModel(model)
+        }
+    })
+
+    if (selectedModelId.trim()) {
+        const selected = models.find(model => model.id === selectedModelId)
+        if (selected && !seen.has(selected.id)) {
+            pushModel(selected)
+        }
+    }
+
+    return shortlist
+}
+
+const mapAiModelToDisplayModel = (model: AIModel): DisplayModel => ({
+    id: model.id,
+    label: model.name || model.id,
+    badges: getDisplayModelFlags(model),
+    disabled: model.status_flag?.disabled === true,
+    type: model.type,
+    transport: model.transport,
+    provider: model.provider,
+    provider_id: model.provider_id,
+    supports_vision: model.supports_vision,
+    capabilities: model.capabilities
+})
 
 interface UIMessage {
     id: string
@@ -1900,6 +2004,10 @@ const ChatPanel = ({
         claimsChecked: 'Số claim đã kiểm',
         conflicts: 'Xung đột',
         sources: 'Nguồn',
+        aiSearchDetails: 'Thông tin tìm kiếm AI',
+        suggestedModels: 'Model đề xuất',
+        viewAllModels: 'Xem tất cả model',
+        showLessModels: 'Thu gọn model',
         unknownDomain: 'không-rõ-miền',
         totalTokensTitle: (total: number, prompt: number, completion: number) => `Tổng token: ${total} • Prompt: ${prompt} • Completion: ${completion}`,
         copy: 'Sao chép',
@@ -2099,6 +2207,10 @@ const ChatPanel = ({
         claimsChecked: 'Claims checked',
         conflicts: 'Conflicts',
         sources: 'Sources',
+        aiSearchDetails: 'AI search details',
+        suggestedModels: 'Suggested models',
+        viewAllModels: 'View all models',
+        showLessModels: 'Show fewer models',
         unknownDomain: 'unknown-domain',
         totalTokensTitle: (total: number, prompt: number, completion: number) => `Total tokens: ${total} • Prompt: ${prompt} • Completion: ${completion}`,
         copy: 'Copy',
@@ -2313,8 +2425,9 @@ const ChatPanel = ({
     const [messages, setMessages] = useState<UIMessage[]>([])
     const [selectedMode, setSelectedMode] = useState<ConversationMode>(conversationModesLocal[0])
     const [models, setModels] = useState<DisplayModel[]>([])
-    const [selectedModel, setSelectedModel] = useState<DisplayModel>({ id: initialModel, label: initialModel, badge: null })
+    const [selectedModel, setSelectedModel] = useState<DisplayModel>(buildFallbackDisplayModel(initialModel))
     const [openComposerMenu, setOpenComposerMenu] = useState<ComposerMenuId>(null)
+    const [showAllModelsInMenu, setShowAllModelsInMenu] = useState(false)
     const [openStudioMenu, setOpenStudioMenu] = useState<StudioDropdownId>(null)
     const [webSearchEnabled, setWebSearchEnabled] = useState(false)
     const [selectedImageTool, setSelectedImageTool] = useState<ImageToolMode>(imageToolModesLocal[0])
@@ -2416,7 +2529,7 @@ const ChatPanel = ({
         label: model.id,
         description: model.label !== model.id
             ? model.label
-            : model.badge
+            : getDisplayModelFlagSummary(model)
     }))
     const voicePresetStudioOptions: StudioOption[] = voicePresetOptions.map(voice => ({
         value: voice,
@@ -2435,7 +2548,7 @@ const ChatPanel = ({
         label: model.id,
         description: model.label !== model.id
             ? model.label
-            : model.badge
+            : getDisplayModelFlagSummary(model)
     }))
     const videoDurationStudioOptions: StudioOption[] = VIDEO_DURATION_OPTIONS.map(option => ({
         value: option,
@@ -2449,6 +2562,21 @@ const ChatPanel = ({
         value: style,
         label: style
     }))
+    const renderModelBadges = (badges: DisplayModelFlag[]) => {
+        if (badges.length === 0) return null
+        return (
+            <span className="model-badge-list">
+                {badges.map(flag => (
+                    <span
+                        key={`${flag.kind}-${flag.code || flag.label}`}
+                        className={`model-badge model-badge-tone-${flag.tone || 'neutral'}`}
+                    >
+                        {flag.label}
+                    </span>
+                ))}
+            </span>
+        )
+    }
     const formatUiDateTime = useCallback((value?: string | null) => {
         if (!value) return ''
         const date = new Date(value)
@@ -2562,6 +2690,12 @@ const ChatPanel = ({
         closeStudioMenus()
     }, [closeComposerMenus, closeStudioMenus])
 
+    useEffect(() => {
+        if (!showModelMenu) {
+            setShowAllModelsInMenu(false)
+        }
+    }, [showModelMenu])
+
     // Auto-scroll to bottom
     const scrollToBottom = useCallback((smooth: boolean = true) => {
         messagesEndRef.current?.scrollIntoView({
@@ -2670,17 +2804,7 @@ const ChatPanel = ({
                 const dedupedModels = Array.from(
                     new Map(apiModels.map((model) => [model.id, model])).values()
                 )
-                const displayModels: DisplayModel[] = dedupedModels.map(m => ({
-                    id: m.id,
-                    label: m.name || m.id,
-                    badge: m.tier === 'pro' ? 'Pro' : m.tier === 'premium' ? 'Premium' : null,
-                    type: m.type,
-                    transport: m.transport,
-                    provider: m.provider,
-                    provider_id: m.provider_id,
-                    supports_vision: m.supports_vision,
-                    capabilities: m.capabilities
-                }))
+                const displayModels: DisplayModel[] = dedupedModels.map(mapAiModelToDisplayModel)
                 setModels(displayModels)
 
                 const configuredModelId = settings.model.trim()
@@ -2693,30 +2817,22 @@ const ChatPanel = ({
                 }
 
                 if (configuredModelId) {
-                    setSelectedModel({
-                        id: configuredModelId,
-                        label: configuredModelId,
-                        badge: null
-                    })
+                    setSelectedModel(buildFallbackDisplayModel(configuredModelId))
                     return
                 }
 
-                setSelectedModel({ id: '', label: '', badge: null })
+                setSelectedModel(buildFallbackDisplayModel(''))
             })
             .catch(() => {
                 if (!isMounted) return
                 setModels([])
                 const configuredModelId = settings.model.trim()
                 if (configuredModelId) {
-                    setSelectedModel({
-                        id: configuredModelId,
-                        label: configuredModelId,
-                        badge: null
-                    })
+                    setSelectedModel(buildFallbackDisplayModel(configuredModelId))
                     return
                 }
 
-                setSelectedModel({ id: '', label: '', badge: null })
+                setSelectedModel(buildFallbackDisplayModel(''))
             })
 
         return () => {
@@ -2742,15 +2858,11 @@ const ChatPanel = ({
                 setSelectedModel(matched)
                 return
             }
-            setSelectedModel({
-                id: configuredModelId,
-                label: configuredModelId,
-                badge: null
-            })
+            setSelectedModel(buildFallbackDisplayModel(configuredModelId))
             return
         }
 
-        setSelectedModel({ id: '', label: '', badge: null })
+        setSelectedModel(buildFallbackDisplayModel(''))
     }, [settings.model, models, selectedModel.id])
 
     useEffect(() => {
@@ -5269,6 +5381,10 @@ const ChatPanel = ({
     const isVideoToolMode = selectedImageTool.id === 'video'
     const isImageEditMode = isImageToolMode && imageAttachments.length > 0
     const isChatMode = selectedImageTool.id === 'chat'
+    const modelMenuSource = isImageToolMode ? imageModels : models
+    const shortlistedModels = buildModelShortlist(modelMenuSource, selectedModel.id)
+    const hasHiddenModels = modelMenuSource.length > shortlistedModels.length
+    const visibleModelMenuOptions = showAllModelsInMenu ? modelMenuSource : shortlistedModels
     const showComposerAttachmentControls = isChatMode || isImageToolMode
     const hasPendingAssistantMessage = messages.some(hasPendingAssistantWork)
     const isInputLocked = isTyping || sendInFlightRef.current || hasPendingAssistantMessage
@@ -5680,111 +5796,101 @@ const ChatPanel = ({
                                                     ))}
                                                 </div>
                                             )}
-                                            {message.webSearch && (
-                                                <div className={`message-web-search-status message-web-search-status-${message.webSearch.status}`}>
-                                                    <div className="message-web-search-line">
-                                                        <span>
-                                                            {getWebSearchStatusLabelLocal(message.webSearch.status)}
-                                                            {message.webSearch.total_search_time_ms
-                                                                ? ` (${message.webSearch.total_search_time_ms}ms)`
-                                                                : ''}
-                                                            {message.webSearch.checked_at_utc
-                                                                ? ` • ${formatUiDateTime(message.webSearch.checked_at_utc)}`
-                                                                : ''}
-                                                        </span>
-                                                        {getWebSearchModeLabelLocal(message.webSearch.mode) && (
-                                                            <span className="message-web-search-badge">
-                                                                {getWebSearchModeLabelLocal(message.webSearch.mode)}
-                                                            </span>
-                                                        )}
-                                                    </div>
+                                            {(message.webSearch || (message.citations && message.citations.length > 0)) && (
+                                                <details className="message-search-details">
+                                                    <summary className="message-search-summary">
+                                                        <span>{copy.aiSearchDetails}</span>
+                                                        <ChevronDown size={14} className="message-search-summary-icon" />
+                                                    </summary>
+                                                    <div className="message-search-details-content">
+                                                        {message.webSearch && (
+                                                            <div className={`message-web-search-status message-web-search-status-${message.webSearch.status}`}>
+                                                                <div className="message-web-search-line">
+                                                                    <span>
+                                                                        {getWebSearchStatusLabelLocal(message.webSearch.status)}
+                                                                        {message.webSearch.total_search_time_ms
+                                                                            ? ` (${message.webSearch.total_search_time_ms}ms)`
+                                                                            : ''}
+                                                                        {message.webSearch.checked_at_utc
+                                                                            ? ` • ${formatUiDateTime(message.webSearch.checked_at_utc)}`
+                                                                            : ''}
+                                                                    </span>
+                                                                    {getWebSearchModeLabelLocal(message.webSearch.mode) && (
+                                                                        <span className="message-web-search-badge">
+                                                                            {getWebSearchModeLabelLocal(message.webSearch.mode)}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
 
-                                                    {(message.webSearch.confidence_score !== undefined
-                                                        || message.webSearch.claims_verified_count !== undefined
-                                                        || message.webSearch.conflicts_count !== undefined) && (
-                                                            <div className="message-web-search-meta">
-                                                                {message.webSearch.confidence_score !== undefined && (
-                                                                    <span>{copy.confidence}: {Math.round(message.webSearch.confidence_score * 100)}%</span>
+                                                                {(message.webSearch.confidence_score !== undefined
+                                                                    || message.webSearch.claims_verified_count !== undefined
+                                                                    || message.webSearch.conflicts_count !== undefined) && (
+                                                                        <div className="message-web-search-meta">
+                                                                            {message.webSearch.confidence_score !== undefined && (
+                                                                                <span>{copy.confidence}: {Math.round(message.webSearch.confidence_score * 100)}%</span>
+                                                                            )}
+                                                                            {message.webSearch.claims_verified_count !== undefined && (
+                                                                                <span>{copy.claimsChecked}: {message.webSearch.claims_verified_count}</span>
+                                                                            )}
+                                                                            {message.webSearch.conflicts_count !== undefined && (
+                                                                                <span>{copy.conflicts}: {message.webSearch.conflicts_count}</span>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+
+                                                                {message.webSearch.warnings && message.webSearch.warnings.length > 0 && (
+                                                                    <div className="message-web-search-warnings">
+                                                                        {message.webSearch.warnings.slice(0, 3).map((warning, warningIndex) => (
+                                                                            <div key={`${message.id}-warn-${warningIndex}`}>• {warning}</div>
+                                                                        ))}
+                                                                    </div>
                                                                 )}
-                                                                {message.webSearch.claims_verified_count !== undefined && (
-                                                                    <span>{copy.claimsChecked}: {message.webSearch.claims_verified_count}</span>
-                                                                )}
-                                                                {message.webSearch.conflicts_count !== undefined && (
-                                                                    <span>{copy.conflicts}: {message.webSearch.conflicts_count}</span>
+
+                                                                {message.webSearch.claim_verification && message.webSearch.claim_verification.length > 0 && (
+                                                                    <div className="message-claim-checks">
+                                                                        {message.webSearch.claim_verification.slice(0, 3).map((item, claimIndex) => (
+                                                                            <div
+                                                                                key={`${message.id}-claim-${claimIndex}-${item.claim}`}
+                                                                                className={`message-claim-check message-claim-check-${item.verdict}`}
+                                                                                title={item.summary || item.claim}
+                                                                            >
+                                                                                <span className="message-claim-check-verdict">
+                                                                                    {getClaimVerdictLabelLocal(item.verdict)}
+                                                                                </span>
+                                                                                <span className="message-claim-check-text">{item.claim}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                         )}
-
-                                                    {message.webSearch.warnings && message.webSearch.warnings.length > 0 && (
-                                                        <div className="message-web-search-warnings">
-                                                            {message.webSearch.warnings.slice(0, 3).map((warning, warningIndex) => (
-                                                                <div key={`${message.id}-warn-${warningIndex}`}>• {warning}</div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-
-                                                    {message.webSearch.claim_verification && message.webSearch.claim_verification.length > 0 && (
-                                                        <div className="message-claim-checks">
-                                                            {message.webSearch.claim_verification.slice(0, 3).map((item, claimIndex) => (
-                                                                <div
-                                                                    key={`${message.id}-claim-${claimIndex}-${item.claim}`}
-                                                                    className={`message-claim-check message-claim-check-${item.verdict}`}
-                                                                    title={item.summary || item.claim}
-                                                                >
-                                                                    <span className="message-claim-check-verdict">
-                                                                        {getClaimVerdictLabelLocal(item.verdict)}
-                                                                    </span>
-                                                                    <span className="message-claim-check-text">{item.claim}</span>
+                                                        {message.citations && message.citations.length > 0 && (
+                                                            <div className="message-citations">
+                                                                <span className="message-citations-title">{copy.sources}</span>
+                                                                <div className="message-citations-list">
+                                                                    {message.citations.map(citation => (
+                                                                        <a
+                                                                            key={`${message.id}-cite-${citation.index}-${citation.url}`}
+                                                                            className="message-citation-link"
+                                                                            href={citation.url}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            title={citation.title}
+                                                                        >
+                                                                            <span className="message-citation-title">[{citation.index}] {citation.title}</span>
+                                                                            {(citation.domain || citation.published_at) && (
+                                                                                <span className="message-citation-meta">
+                                                                                    {citation.domain || copy.unknownDomain}
+                                                                                    {citation.published_at ? ` • ${formatUiDateTime(citation.published_at)}` : ''}
+                                                                                </span>
+                                                                            )}
+                                                                        </a>
+                                                                    ))}
                                                                 </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {message.citations && message.citations.length > 0 && (
-                                                <div className="message-citations">
-                                                    <span className="message-citations-title">{copy.sources}</span>
-                                                    <div className="message-citations-list">
-                                                        {message.citations.map(citation => (
-                                                            <a
-                                                                key={`${message.id}-cite-${citation.index}-${citation.url}`}
-                                                                className="message-citation-link"
-                                                                href={citation.url}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                title={citation.title}
-                                                            >
-                                                                <span className="message-citation-title">[{citation.index}] {citation.title}</span>
-                                                                {(citation.domain || citation.published_at) && (
-                                                                    <span className="message-citation-meta">
-                                                                        {citation.domain || copy.unknownDomain}
-                                                                        {citation.published_at ? ` • ${formatUiDateTime(citation.published_at)}` : ''}
-                                                                    </span>
-                                                                )}
-                                                            </a>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {message.usage && (
-                                                <div className="message-usage-wrap">
-                                                    <span
-                                                        className={`message-usage-meta ${message.usage.estimated ? 'message-usage-meta-estimated' : ''}`}
-                                                        title={copy.totalTokensTitle(
-                                                            message.usage.totalTokens,
-                                                            message.usage.promptTokens,
-                                                            message.usage.completionTokens
+                                                            </div>
                                                         )}
-                                                    >
-                                                        <span className="message-usage-item">
-                                                            {message.usage.estimated ? '~' : ''}{formatUsageTokenLabel(message.usage)}
-                                                        </span>
-                                                        <span className="message-usage-separator">•</span>
-                                                        <span className="message-usage-item">
-                                                            {message.usage.estimated ? '~' : ''}{formatUsageCostLabel(message.usage)}
-                                                        </span>
-                                                    </span>
-                                                </div>
+                                                    </div>
+                                                </details>
                                             )}
                                         </>
                                     )}
@@ -6304,11 +6410,10 @@ const ChatPanel = ({
                                 <button
                                     className="selector-btn model-selector"
                                     onClick={() => toggleComposerMenu('model')}
+                                    title={getDisplayModelFlagSummary(selectedModel) || undefined}
                                 >
-                                    <span>{selectedModel.label || copy.selectModel}</span>
-                                    {selectedModel.badge && (
-                                        <span className="model-badge">{selectedModel.badge}</span>
-                                    )}
+                                    <span className="model-selector-label">{selectedModel.label || copy.selectModel}</span>
+                                    {renderModelBadges(selectedModel.badges)}
                                     <ChevronDown size={14} />
                                 </button>
                                 <AnimatePresence>
@@ -6319,22 +6424,41 @@ const ChatPanel = ({
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: 8 }}
                                         >
-                                            {(isImageToolMode ? imageModels : models).map(model => (
+                                            {!showAllModelsInMenu && hasHiddenModels && (
+                                                <div className="model-menu-section-label">
+                                                    {copy.suggestedModels}
+                                                </div>
+                                            )}
+                                            {visibleModelMenuOptions.map(model => (
                                                 <button
                                                     key={model.id}
-                                                    className={`dropdown-item ${selectedModel.id === model.id ? 'active' : ''}`}
+                                                    className={`dropdown-item ${selectedModel.id === model.id ? 'active' : ''} ${model.disabled ? 'dropdown-item-disabled' : ''}`}
+                                                    disabled={model.disabled}
+                                                    title={getDisplayModelFlagSummary(model) || undefined}
                                                     onClick={() => {
+                                                        if (model.disabled) return
                                                         setSelectedModel(model)
                                                         onSettingsChange({ model: model.id })
                                                         closeComposerMenus()
                                                     }}
                                                 >
-                                                    <span>{model.label}</span>
-                                                    {model.badge && (
-                                                        <span className="model-badge">{model.badge}</span>
-                                                    )}
+                                                    <span className="dropdown-item-main">{model.label}</span>
+                                                    {renderModelBadges(model.badges)}
                                                 </button>
                                             ))}
+                                            {hasHiddenModels && (
+                                                <>
+                                                    <div className="model-menu-divider" />
+                                                    <button
+                                                        className="model-menu-toggle"
+                                                        onClick={() => {
+                                                            setShowAllModelsInMenu(prev => !prev)
+                                                        }}
+                                                    >
+                                                        {showAllModelsInMenu ? copy.showLessModels : copy.viewAllModels}
+                                                    </button>
+                                                </>
+                                            )}
                                         </motion.div>
                                     )}
                                 </AnimatePresence>

@@ -410,6 +410,115 @@ describe('ChatPanel settings integration', () => {
         expect(request.model).toBe('gpt-4.1-mini')
     })
 
+    it('renders provider-supplied model flags and disables stopped models in the dropdown', async () => {
+        getModels.mockResolvedValue([
+            {
+                id: 'gpt-5',
+                name: 'GPT-5',
+                provider: 'openai',
+                tier: 'plus',
+                type: 'chat',
+                supports_streaming: true,
+                supports_vision: true,
+                max_tokens: 8192,
+                description: null,
+                priority: 100,
+                is_active: true,
+                recommendation_flag: {
+                    label: 'Best',
+                    tone: 'accent',
+                },
+                status_flag: {
+                    label: 'Active',
+                    tone: 'success',
+                },
+            },
+            {
+                id: 'legacy-gpt',
+                name: 'Legacy GPT',
+                provider: 'openai',
+                tier: 'plus',
+                type: 'chat',
+                supports_streaming: true,
+                supports_vision: false,
+                max_tokens: 4096,
+                description: null,
+                priority: 100,
+                is_active: true,
+                status_flag: {
+                    label: 'Stopped',
+                    tone: 'danger',
+                    disabled: true,
+                },
+            },
+        ])
+
+        renderChatPanel({
+            ...EN_SETTINGS,
+            model: 'gpt-5',
+        })
+
+        await waitFor(() => {
+            expect(screen.getByText('Best')).toBeInTheDocument()
+            expect(screen.getByText('Active')).toBeInTheDocument()
+        })
+
+        const modelTrigger = screen.getByText('GPT-5').closest('button')
+        expect(modelTrigger).not.toBeNull()
+        fireEvent.click(modelTrigger!)
+
+        await waitFor(() => {
+            const legacyButton = screen.getByText('Legacy GPT').closest('button')
+            expect(legacyButton).not.toBeNull()
+            expect(legacyButton).toBeDisabled()
+        })
+        expect(screen.getByText('Stopped')).toBeInTheDocument()
+    })
+
+    it('shows a short model list first and expands on demand', async () => {
+        getModels.mockResolvedValue(
+            Array.from({ length: 6 }, (_, index) => ({
+                id: `model-${index + 1}`,
+                name: `Model ${index + 1}`,
+                provider: 'openai',
+                tier: 'plus',
+                type: 'chat',
+                supports_streaming: true,
+                supports_vision: false,
+                max_tokens: 4096,
+                description: null,
+                priority: 100,
+                is_active: true,
+            }))
+        )
+
+        renderChatPanel({
+            ...EN_SETTINGS,
+            model: 'model-1',
+        })
+
+        await waitFor(() => {
+            expect(screen.getByText('Model 1')).toBeInTheDocument()
+        })
+
+        const modelTrigger = screen.getByText('Model 1').closest('button')
+        expect(modelTrigger).not.toBeNull()
+        fireEvent.click(modelTrigger!)
+
+        await waitFor(() => {
+            expect(screen.getByText('Suggested models')).toBeInTheDocument()
+            expect(screen.getByText('View all models')).toBeInTheDocument()
+        })
+        expect(screen.queryByText('Model 6')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByText('View all models'))
+
+        await waitFor(() => {
+            expect(screen.getByText('Model 6')).toBeInTheDocument()
+            expect(screen.getByText('Show fewer models')).toBeInTheDocument()
+        })
+    })
+
     it('disables chat send when no chat model is selected', async () => {
         renderChatPanel({
             ...EN_SETTINGS,

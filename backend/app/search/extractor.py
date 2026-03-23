@@ -34,6 +34,20 @@ _HIGH_TRUST_DOMAINS = {
 
 _MEDIUM_TRUST_HINTS = ("gov", "edu", "org", "who.int", "imf.org", "worldbank.org", "oecd.org")
 _LOW_TRUST_HINTS = ("blogspot.", "wordpress.", "tumblr.", "medium.com", "reddit.com")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_PRICE_KEYWORD_RE = re.compile(
+    r"(?i)(?:\b(?:price|pricing|cost|quote|quoted|rate|fee|fees|how much|bao nhieu|gia|phi|ty gia)\b|giá|phí|tỷ giá)"
+)
+_PRICE_VALUE_RE = re.compile(
+    r"(?i)(?:"
+    r"[$€£¥₫]\s?\d[\d,.\s]{0,24}"
+    r"|"
+    r"\d[\d,.\s]{0,24}\s?(?:usd|eur|gbp|vnd|vnđ|đ|₫|jpy|cny|btc|eth|triệu|trieu|nghìn|nghin|k|m|b|\/kg|\/g|\/oz)"
+    r"|"
+    r"\d[\d,.\s]{0,18}(?:\s?[-–]\s?\d[\d,.\s]{0,18})\s?(?:usd|eur|gbp|vnd|vnđ|đ|₫|triệu|trieu|nghìn|nghin)"
+    r")"
+)
+_DATE_VALUE_RE = re.compile(r"\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b")
 
 _NEGATION_HINTS = (
     "not true", "false", "incorrect", "misleading", "debunk", "rumor",
@@ -68,6 +82,61 @@ def _normalize_multiline_text(text: str) -> str:
         blank_streak = 0
         cleaned_lines.append(line)
     return "\n".join(cleaned_lines).strip()
+
+
+def _is_price_focus(focus: str | None) -> bool:
+    return (focus or "").strip().lower() == "price"
+
+
+def _format_excerpt(text: str, *, preserve_formatting: bool) -> str:
+    if preserve_formatting:
+        return _normalize_multiline_text(text)
+    return _normalize_text(text)
+
+
+def _extract_price_excerpt(raw_text: str, *, max_chars: int, preserve_formatting: bool) -> str:
+    segments: List[Tuple[int, str]] = []
+    for raw_segment in _SENTENCE_SPLIT_RE.split(raw_text or ""):
+        candidate = raw_segment.strip(" \t\r\n-•")
+        if len(candidate) < 8:
+            continue
+        score = 0
+        if _PRICE_VALUE_RE.search(candidate):
+            score += 5
+        if _PRICE_KEYWORD_RE.search(candidate):
+            score += 3
+        if _DATE_VALUE_RE.search(candidate):
+            score += 1
+        if score > 0:
+            segments.append((score, candidate))
+
+    if not segments:
+        return _truncate(_format_excerpt(raw_text, preserve_formatting=preserve_formatting), max_chars)
+
+    segments.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
+
+    chosen: List[str] = []
+    seen: set[str] = set()
+    total_chars = 0
+    joiner = "\n" if preserve_formatting else " "
+    for _, segment in segments:
+        normalized = _format_excerpt(segment, preserve_formatting=preserve_formatting)
+        lowered = normalized.lower()
+        if not normalized or lowered in seen:
+            continue
+        projected = total_chars + len(normalized) + (len(joiner) if chosen else 0)
+        if chosen and projected > max_chars:
+            continue
+        seen.add(lowered)
+        chosen.append(normalized)
+        total_chars = projected
+        if len(chosen) >= 2 or total_chars >= int(max_chars * 0.75):
+            break
+
+    if not chosen:
+        return _truncate(_format_excerpt(raw_text, preserve_formatting=preserve_formatting), max_chars)
+
+    return _truncate(joiner.join(chosen), max_chars)
 
 
 def _tokenize(text: str) -> set[str]:
@@ -254,6 +323,7 @@ def extract_facts_and_citations(
     mode: SearchMode = SearchMode.AUTO,
     preferred_domains: Sequence[str] | None = None,
     preserve_formatting: bool = False,
+    focus: str | None = None,
 ) -> Tuple[List[str], List[Dict]]:
     """
     Convert raw results into concise factual lines + structured citations.
@@ -273,7 +343,13 @@ def extract_facts_and_citations(
         seen_urls.add(url)
 
         raw_snippet = result.full_content or result.snippet or ""
-        if preserve_formatting:
+        if _is_price_focus(focus):
+            snippet = _extract_price_excerpt(
+                raw_snippet,
+                max_chars=max(120, int(max_snippet_chars)),
+                preserve_formatting=preserve_formatting,
+            )
+        elif preserve_formatting:
             snippet = _truncate(_normalize_multiline_text(raw_snippet), max(120, int(max_snippet_chars)))
         else:
             snippet = _truncate(_normalize_text(raw_snippet), max(80, int(max_snippet_chars)))

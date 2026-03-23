@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     model_admin_api_key: str = ""  # Required for model catalog write operations
     admin_bootstrap_emails: str = ""  # Comma-separated emails elevated to admin on login/auth
 
-    # Web search pipeline (Tavily + Jina Reader)
+    # Web search pipeline (Tavily + Jina Reader + Browser Subagent)
     web_search_enabled_default: bool = False
     web_search_tavily_api_key: str = ""
     web_search_tavily_endpoint: str = "https://api.tavily.com/search"
@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     web_search_duckduckgo_enabled: bool = True
     web_search_duckduckgo_region: str = "us-en"
     web_search_duckduckgo_safesearch: str = "moderate"
-    web_search_duckduckgo_backend: str = "html"
+    web_search_duckduckgo_backend: str = "auto"
     web_search_github_enabled: bool = True
     web_search_github_api_endpoint: str = "https://api.github.com"
     web_search_github_token: str = ""
@@ -65,12 +65,16 @@ class Settings(BaseSettings):
     web_search_github_max_file_chars: int = 1800
     web_search_github_max_render_chars: int = 7200
     web_search_jina_endpoint: str = "https://r.jina.ai/"
-    web_search_timeout_seconds: float = 12.0
-    web_search_max_results: int = 5
-    web_search_url_read_max_snippet_chars: int = 4200
+    web_search_browser_enabled: bool = True
+    web_search_browser_timeout_seconds: float = 20.0
+    web_search_browser_max_content_chars: int = 20000
+    web_search_browser_min_content_chars: int = 1200
+    web_search_timeout_seconds: float = 15.0
+    web_search_max_results: int = 8
+    web_search_url_read_max_snippet_chars: int = 8000
     web_search_cache_ttl_seconds: int = 600
     web_search_rate_limit_per_minute: int = 30
-    web_search_max_deep_reads: int = 2
+    web_search_max_deep_reads: int = 4
     web_search_verify_max_claims: int = 4
     web_search_verify_min_sources_per_claim: int = 2
     web_search_verify_max_queries: int = 8

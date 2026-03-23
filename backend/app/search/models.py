@@ -106,6 +106,8 @@ class SearchContext:
     claims_verified_count: int = 0
     claim_verification: List[ClaimVerification] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    query_focus: Optional[str] = None
+    answer_guidance: List[str] = field(default_factory=list)
 
     @property
     def has_results(self) -> bool:
@@ -129,6 +131,11 @@ class SearchContext:
             lines.append("\nImportant notes:")
             for warning in self.warnings:
                 lines.append(f"- {warning}")
+
+        if self.answer_guidance:
+            lines.append("\nFinal answer requirements:")
+            for item in self.answer_guidance:
+                lines.append(f"- {item}")
 
         if self.facts:
             lines.append("\nEvidence snippets:")

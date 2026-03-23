@@ -167,6 +167,7 @@ _SEARCH_COORDINATOR_LOCK = asyncio.Lock()
 MAX_FILE_ATTACHMENTS_IN_CONTEXT = 4
 MAX_FILE_ATTACHMENT_CHARS_PER_FILE = 8_000
 MAX_FILE_ATTACHMENT_TOTAL_CHARS = 24_000
+MAX_FILE_ATTACHMENT_CHUNKS_PER_FILE = 3
 _IMAGE_PROMPT_LOG_PREVIEW_CHARS = 360
 
 _VIETNAMESE_CHAR_RE = re.compile(
@@ -187,6 +188,10 @@ _TURN_COMPLEXITY_HINT_RE = re.compile(
 _TURN_RECENCY_HINT_RE = re.compile(
     r"(latest|today|current|news|recent|breaking|price|release|cve|security update|"
     r"mới nhất|hôm nay|hiện tại|tin tức|cập nhật|giá|thời gian thực)"
+)
+_TURN_PRICE_HINT_RE = re.compile(
+    r"(price|pricing|cost|rate|fee|fees|how much|quote|"
+    r"giá|gia|bao nhiêu|bao nhieu|phí|phi|tỷ giá|tỉ giá|ty gia|mức giá)"
 )
 _TURN_VERIFICATION_HINT_RE = re.compile(
     r"(verify|verification|fact ?check|citation|source|evidence|accuracy|legal|law|regulation|medical|finance|security|"
@@ -333,6 +338,14 @@ class V1ChatMessage(BaseModel):
     content: Any  # str or list[{type: "text"|"image_url", ...}] for multimodal
 
 
+class V1FileChunk(BaseModel):
+    index: int
+    label: Optional[str] = None
+    text: str
+    char_count: Optional[int] = None
+    truncated: Optional[bool] = False
+
+
 class V1FileAttachment(BaseModel):
     id: str
     filename: str
@@ -341,6 +354,7 @@ class V1FileAttachment(BaseModel):
     extracted_text: str
     text_chars: Optional[int] = None
     truncated: Optional[bool] = False
+    chunks: Optional[List[V1FileChunk]] = None
 
 
 class V1ChatCompletionRequest(BaseModel):
@@ -3854,6 +3868,30 @@ def _infer_pigtex_supports_vision(
     return any(tag in lowered for tag in ("-vl", "vl-", "omni", "ocr", "vision", "image"))
 
 
+def _normalize_model_provider_flag(value: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+
+    label = value.get("label")
+    if not isinstance(label, str) or not label.strip():
+        return None
+
+    normalized: dict[str, Any] = {
+        "label": label.strip(),
+    }
+    code = value.get("code")
+    if isinstance(code, str) and code.strip():
+        normalized["code"] = code.strip()
+    tone = value.get("tone")
+    if isinstance(tone, str) and tone.strip().lower() in {"neutral", "accent", "success", "warning", "danger"}:
+        normalized["tone"] = tone.strip().lower()
+    disabled = value.get("disabled")
+    if isinstance(disabled, bool):
+        normalized["disabled"] = disabled
+
+    return normalized
+
+
 def _normalize_pigtex_models_data(models: list[dict], provider: str) -> list[dict]:
     normalized: list[dict] = []
     for model in models:
@@ -3913,6 +3951,8 @@ def _normalize_pigtex_models_data(models: list[dict], provider: str) -> list[dic
                 "max_output": max_output,
                 "tier": model.get("tier") or "plus",
                 "capabilities": capabilities,
+                "recommendation_flag": _normalize_model_provider_flag(model.get("recommendation_flag")),
+                "status_flag": _normalize_model_provider_flag(model.get("status_flag")),
             }
         )
 
@@ -3973,6 +4013,8 @@ def _normalize_upstream_models_payload(provider: str, payload: Any) -> dict:
                             supports_vision=supports_vision,
                             supported_methods=method_set,
                         ),
+                        "recommendation_flag": _normalize_model_provider_flag(model.get("recommendation_flag")),
+                        "status_flag": _normalize_model_provider_flag(model.get("status_flag")),
                     }
                 )
 
@@ -4008,6 +4050,8 @@ def _normalize_upstream_models_payload(provider: str, payload: Any) -> dict:
                             supports_vision=inferred_supports_vision,
                             raw_capabilities=model.get("capabilities"),
                         ),
+                        "recommendation_flag": _normalize_model_provider_flag(model.get("recommendation_flag")),
+                        "status_flag": _normalize_model_provider_flag(model.get("status_flag")),
                     }
                 )
 
@@ -4528,6 +4572,13 @@ def _needs_strict_verification(user_text: str) -> bool:
     return bool(_TURN_VERIFICATION_HINT_RE.search(lowered))
 
 
+def _needs_price_precision(user_text: str) -> bool:
+    lowered = (user_text or "").strip().lower()
+    if not lowered:
+        return False
+    return bool(_TURN_PRICE_HINT_RE.search(lowered))
+
+
 def _derive_web_search_policy(
     request: V1ChatCompletionRequest,
     latest_user_text: str,
@@ -4550,6 +4601,7 @@ def _derive_web_search_policy(
     turn_mode = _normalize_turn_mode(request.mode)
     complexity_score = _estimate_turn_complexity(latest_user_text)
     recency_intent = _has_recency_intent(latest_user_text)
+    price_intent = _needs_price_precision(latest_user_text)
     strict_verification = _needs_strict_verification(latest_user_text)
 
     raw_requested_mode = (request.web_search_mode or "auto").strip().lower()
@@ -4558,6 +4610,8 @@ def _derive_web_search_policy(
 
     resolved_mode = normalized_requested_mode if mode_explicitly_requested else "auto"
     if resolved_mode == "auto":
+        if price_intent:
+            resolved_mode = "fast"
         if strict_verification and (turn_mode == "deep" or complexity_score >= 2):
             resolved_mode = "deep"
         elif recency_intent:
@@ -4571,6 +4625,7 @@ def _derive_web_search_policy(
     if not deep_read_explicit:
         deep_read = (
             resolved_mode in {"deep", "url_read"}
+            or price_intent
             or (turn_mode == "deep" and complexity_score >= 2)
         )
     if not deep_verify_explicit:
@@ -4586,6 +4641,8 @@ def _derive_web_search_policy(
             max_results = 8 if turn_mode == "deep" else 6
         elif turn_mode == "deep" and (complexity_score >= 2 or recency_intent):
             max_results = 6
+        elif price_intent:
+            max_results = 6
         elif recency_intent:
             max_results = 5
         else:
@@ -4597,6 +4654,7 @@ def _derive_web_search_policy(
         and (
             mode_explicitly_requested
             or resolved_mode in {"deep", "fast", "url_read"}
+            or price_intent
             or recency_intent
             or strict_verification
             or complexity_score >= 3
@@ -4606,6 +4664,8 @@ def _derive_web_search_policy(
     reasons: list[str] = []
     if recency_intent:
         reasons.append("recency")
+    if price_intent:
+        reasons.append("price")
     if strict_verification:
         reasons.append("verification")
     if complexity_score >= 3:
@@ -4619,6 +4679,7 @@ def _derive_web_search_policy(
         "turn_mode": turn_mode,
         "complexity_score": complexity_score,
         "recency_intent": recency_intent,
+        "price_intent": price_intent,
         "strict_verification": strict_verification,
         "recommended_search": recommend_search,
         "requested_mode": raw_requested_mode or "auto",
@@ -4697,8 +4758,101 @@ def _truncate_context_text(text: str, max_chars: int) -> tuple[str, bool]:
     return text[:max_chars].rstrip(), True
 
 
+def _tokenize_file_context_query(text: str) -> set[str]:
+    normalized = _normalize_matching_text(text)
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9_]+", normalized)
+        if len(token) >= 2
+    }
+    stopwords = {
+        "the", "and", "for", "with", "this", "that", "from", "into", "about",
+        "hay", "la", "va", "cho", "voi", "cua", "nhung", "trong", "mot", "cac",
+        "nhu", "nay", "kia", "gi", "nao", "ve", "tu", "tren", "duoi", "sau",
+        "file", "pdf", "docx",
+    }
+    return {token for token in tokens if token not in stopwords}
+
+
+def _score_file_chunk(chunk: V1FileChunk, query_tokens: set[str], filename_tokens: set[str]) -> float:
+    chunk_text = _normalize_matching_text(chunk.text)
+    if not chunk_text:
+        return -1.0
+
+    chunk_tokens = _tokenize_file_context_query(chunk_text)
+    label_tokens = _tokenize_file_context_query(chunk.label or "")
+    overlap = len(query_tokens.intersection(chunk_tokens))
+    label_overlap = len(query_tokens.intersection(label_tokens))
+    filename_overlap = len(filename_tokens.intersection(chunk_tokens))
+    position_bonus = max(0.0, 0.35 - ((max(1, int(chunk.index)) - 1) * 0.08))
+    content_density = min(1.0, len(chunk_text) / 1200.0)
+    structural_bonus = 0.12 if label_tokens else 0.0
+
+    if not query_tokens:
+        return position_bonus + structural_bonus + (0.2 * content_density)
+
+    relevance_signal = (overlap * 1.8) + (label_overlap * 2.3) + (filename_overlap * 0.35)
+    if relevance_signal <= 0:
+        return -0.5 + position_bonus + (0.1 * content_density)
+    return relevance_signal + position_bonus + structural_bonus + (0.15 * content_density)
+
+
+def _select_file_chunks_for_context(
+    item: V1FileAttachment,
+    query_text: str,
+    max_chars: int,
+    max_chunks: int = MAX_FILE_ATTACHMENT_CHUNKS_PER_FILE,
+) -> list[tuple[V1FileChunk, str, bool]]:
+    chunks = [
+        chunk for chunk in (item.chunks or [])
+        if isinstance(chunk, V1FileChunk) and (chunk.text or "").strip()
+    ]
+    if not chunks:
+        fallback_chunk = V1FileChunk(
+            index=1,
+            label="Chunk 1",
+            text=item.extracted_text,
+            char_count=item.text_chars,
+            truncated=item.truncated,
+        )
+        chunks = [fallback_chunk]
+
+    query_tokens = _tokenize_file_context_query(query_text)
+    filename_tokens = _tokenize_file_context_query(Path(item.filename or "").stem)
+    ranked = sorted(
+        (
+            (chunk, _score_file_chunk(chunk, query_tokens, filename_tokens))
+            for chunk in chunks
+        ),
+        key=lambda item: (-item[1], int(item[0].index or 0)),
+    )
+
+    selected: list[tuple[V1FileChunk, str, bool]] = []
+    consumed = 0
+    for chunk, score in ranked[:max(1, max_chunks * 2)]:
+        remaining_budget = max_chars - consumed
+        if remaining_budget <= 0 or len(selected) >= max_chunks:
+            break
+        if query_tokens and score <= 0:
+            continue
+        snippet, snippet_truncated = _truncate_context_text((chunk.text or "").strip(), remaining_budget)
+        if not snippet:
+            continue
+        selected.append((chunk, snippet, snippet_truncated))
+        consumed += len(snippet)
+
+    if selected:
+        return selected
+
+    fallback_snippet, fallback_truncated = _truncate_context_text((chunks[0].text or "").strip(), max_chars)
+    if not fallback_snippet:
+        return []
+    return [(chunks[0], fallback_snippet, fallback_truncated)]
+
+
 def _build_file_context_system_prompt(
     file_attachments: Optional[List[V1FileAttachment]],
+    query_text: str = "",
 ) -> Optional[str]:
     if not file_attachments:
         return None
@@ -4707,6 +4861,11 @@ def _build_file_context_system_prompt(
         "The user attached files. The following extracted text is supplemental context.",
         "Use it when relevant, cite the filename in your answer, and mention uncertainty if content seems partial.",
     ]
+    if _needs_price_precision(query_text):
+        lines.append(
+            "When the answer depends on prices, fees, quotas, or other numeric limits in the attached files, "
+            "quote the exact number if present; otherwise give the tightest defensible range and cite the filename plus chunk label."
+        )
     included = 0
     consumed_chars = 0
 
@@ -4720,24 +4879,30 @@ def _build_file_context_system_prompt(
             break
 
         max_for_item = min(MAX_FILE_ATTACHMENT_CHARS_PER_FILE, remaining_budget)
-        snippet, snippet_truncated = _truncate_context_text(extracted, max_for_item)
-        if not snippet:
+        chunk_payloads = _select_file_chunks_for_context(item, query_text, max_for_item)
+        if not chunk_payloads:
             continue
 
         safe_name = Path(item.filename or f"file_{included + 1}").name or f"file_{included + 1}"
         mime_type = (item.mime_type or "application/octet-stream").strip().lower()
-        lines.extend(
-            [
-                f"[Attached File {included + 1}] {safe_name} ({mime_type}, {item.size} bytes)",
-                "```text",
-                snippet,
-                "```",
-            ]
-        )
-        if bool(item.truncated) or snippet_truncated:
+        lines.append(f"[Attached File {included + 1}] {safe_name} ({mime_type}, {item.size} bytes)")
+        for chunk, snippet, snippet_truncated in chunk_payloads:
+            label = (chunk.label or f"Chunk {chunk.index}").strip()
+            lines.extend(
+                [
+                    f"[Relevant chunk {chunk.index}] {label}",
+                    "```text",
+                    snippet,
+                    "```",
+                ]
+            )
+            if bool(chunk.truncated) or snippet_truncated:
+                lines.append(f"Note: chunk {chunk.index} from {safe_name} was truncated.")
+            consumed_chars += len(snippet)
+
+        if bool(item.truncated):
             lines.append(f"Note: extracted content for {safe_name} was truncated.")
 
-        consumed_chars += len(snippet)
         included += 1
 
     if included == 0:
@@ -5655,13 +5820,20 @@ async def v1_chat_completions(
                 )
 
             if not request.use_memory:
-                file_context_prompt = _build_file_context_system_prompt(request.file_attachments)
+                file_context_prompt = _build_file_context_system_prompt(
+                    request.file_attachments,
+                    query_text=latest_user_text,
+                )
                 if file_context_prompt:
                     _msgs = _prepend_system_message(_msgs, file_context_prompt)
 
             if search_enabled and latest_user_text:
                 try:
                     search_coordinator = await _get_search_coordinator()
+                    search_timeout_seconds = max(
+                        3.0,
+                        float(getattr(settings, "web_search_timeout_seconds", 12.0) or 12.0) + 2.0,
+                    )
                     requested_search_mode = str(turn_search_policy.get("resolved_mode") or "auto")
                     deep_read_requested = bool(turn_search_policy.get("deep_read"))
                     deep_verify_requested = bool(turn_search_policy.get("deep_verify"))
@@ -5680,14 +5852,29 @@ async def v1_chat_completions(
                         turn_search_policy.get("complexity_score"),
                         turn_search_policy.get("reason_label"),
                     )
-                    _search_context = await search_coordinator.run(
-                        user_message=latest_user_text,
-                        force=True,
-                        max_results=search_max_results,
-                        deep_read=deep_read_requested,
-                        mode=requested_search_mode,
-                        deep_verify=deep_verify_requested,
-                    )
+                    try:
+                        _search_context = await asyncio.wait_for(
+                            search_coordinator.run(
+                                user_message=latest_user_text,
+                                force=True,
+                                max_results=search_max_results,
+                                deep_read=deep_read_requested,
+                                mode=requested_search_mode,
+                                deep_verify=deep_verify_requested,
+                            ),
+                            timeout=search_timeout_seconds,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Web search pipeline timed out request_id=%s timeout_seconds=%s",
+                            request_id,
+                            search_timeout_seconds,
+                        )
+                        _search_context = SearchContext(
+                            warnings=[
+                                "Web search timed out, so PigTex continued without live search evidence."
+                            ]
+                        )
                     if _search_context.has_results:
                         _msgs = _prepend_system_message(_msgs, _search_context.to_prompt_section())
                 except Exception as e:
@@ -5957,7 +6144,10 @@ async def _build_messages_with_local_memory(
                 }
                 break
 
-    file_context_prompt = _build_file_context_system_prompt(request.file_attachments)
+    file_context_prompt = _build_file_context_system_prompt(
+        request.file_attachments,
+        query_text=latest_user_text,
+    )
     if file_context_prompt:
         messages_for_api = _prepend_system_message(messages_for_api, file_context_prompt)
     style_preferences_prompt = _build_style_preferences_system_prompt(coordinator)

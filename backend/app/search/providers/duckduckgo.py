@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class DuckDuckGoSearchProvider:
-    """Fallback search provider using DuckDuckGo HTML/lite backends."""
+    """Fallback search provider built on top of DDGS."""
 
     _VIETNAMESE_CHAR_RE = re.compile(
         r"[ăâđêôơưĂÂĐÊÔƠƯ"
@@ -32,6 +32,7 @@ class DuckDuckGoSearchProvider:
         r"ýỳỷỹỵ]"
     )
     _CJK_CHAR_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+    _LEGACY_BACKENDS = {"html", "lite"}
 
     def __init__(
         self,
@@ -39,11 +40,13 @@ class DuckDuckGoSearchProvider:
         region: str = "us-en",
         safesearch: str = "moderate",
         backend: str = "html",
+        timeout_seconds: float = 5.0,
     ) -> None:
         self.enabled = bool(enabled)
         self.region = (region or "us-en").strip() or "us-en"
         self.safesearch = (safesearch or "moderate").strip() or "moderate"
         self.backend = (backend or "html").strip() or "html"
+        self.timeout_seconds = max(1.0, float(timeout_seconds or 5.0))
 
     @property
     def is_enabled(self) -> bool:
@@ -68,6 +71,14 @@ class DuckDuckGoSearchProvider:
             return "wt-wt"
         return self.region
 
+    def _resolve_backend(self, topic: str) -> str:
+        normalized_backend = (self.backend or "auto").strip().lower() or "auto"
+        if normalized_backend in self._LEGACY_BACKENDS:
+            return "auto"
+        if (topic or "").strip().lower() == "news":
+            return "auto"
+        return normalized_backend
+
     async def search(
         self,
         query: str,
@@ -84,17 +95,21 @@ class DuckDuckGoSearchProvider:
 
         timelimit = self._map_timelimit(freshness_days)
         region = self._resolve_region(normalized_query)
+        normalized_topic = (topic or "general").strip().lower() or "general"
+        backend = self._resolve_backend(normalized_topic)
 
         def _run() -> List[SearchResult]:
             outputs: List[SearchResult] = []
-            with DDGS() as ddgs:
+            ddgs_timeout_seconds = max(1, int(round(self.timeout_seconds)))
+            with DDGS(timeout=ddgs_timeout_seconds) as ddgs:
+                search_method = ddgs.news if normalized_topic == "news" else ddgs.text
                 raw_results = list(
-                    ddgs.text(
+                    search_method(
                         normalized_query,
                         region=region,
                         safesearch=self.safesearch,
                         timelimit=timelimit,
-                        backend=self.backend,
+                        backend=backend,
                         max_results=max(1, min(10, int(max_results))),
                     )
                 )
@@ -114,13 +129,23 @@ class DuckDuckGoSearchProvider:
                         snippet=snippet,
                         relevance_score=0.45,
                         source_provider="duckduckgo",
-                        published_at=None,
+                        published_at=str(item.get("date") or item.get("published_at") or "").strip() or None,
                     )
                 )
             return outputs
 
         try:
-            return await asyncio.to_thread(_run)
+            return await asyncio.wait_for(
+                asyncio.to_thread(_run),
+                timeout=self.timeout_seconds + 1.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "DuckDuckGo search timed out query=%s timeout_seconds=%s",
+                normalized_query,
+                self.timeout_seconds,
+            )
+            return []
         except Exception as e:
             logger.warning("DuckDuckGo search failed query=%s error_type=%s error=%s", normalized_query, type(e).__name__, e)
             return []

@@ -168,8 +168,8 @@ def build_public_provider_catalog() -> list[dict[str, object]]:
             "default_base_url": settings.texapi_partner_gateway_base_url.strip(),
             "docs_url": "",
             "auth_style": "bearer",
-            "supports_byok": False,
-            "managed_by_server": True,
+            "supports_byok": True,
+            "managed_by_server": False,
             "aliases": ["texapi", "tex-api"],
         },
         *[

@@ -128,8 +128,8 @@ const FALLBACK_API_PROVIDER_CATALOG: ApiProviderCatalogEntry[] = [
         default_base_url: 'https://api.texapi.dev/v1/partner/gateway',
         docs_url: '',
         auth_style: 'bearer',
-        supports_byok: false,
-        managed_by_server: true,
+        supports_byok: true,
+        managed_by_server: false,
         aliases: ['texapi', 'tex-api'],
     },
     {

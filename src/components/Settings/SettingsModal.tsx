@@ -572,9 +572,11 @@ const SettingsModal = ({
         providerManagedBaseUrlHint: 'Base URL này được quản lý ở tầng cấu hình khác.',
         providerManagedTestHint: 'Provider này không hỗ trợ test kết nối từ client.',
         providerManagedTexapiConnectionHint: 'TexAPI ở đây được PigTex quản lý sẵn cho tài khoản của bạn.',
-        providerManagedTexapiHint: 'TexAPI trên PigTex dùng credits do PigTex quản lý, nên bạn không cần dán API key TexAPI ở đây. Nếu thấy các model như Qwen, DeepSeek hay GPT thì đó vẫn là catalog đi qua gateway TexAPI, và usage bị trừ vào credits TexAPI của tài khoản PigTex này. Muốn dùng key riêng, hãy chuyển sang OpenAI, Google, Anthropic hoặc Alibaba.',
+        providerManagedTexapiHint: 'TexAPI hoạt động như một cổng bình thường: bạn có thể nhập API key và Base URL riêng. Nếu để trống API key và giữ Base URL mặc định, PigTex sẽ tự dùng gateway partner cùng credits TexAPI đã cấp cho tài khoản này.',
+        texapiByokHint: 'Bạn đang dùng cấu hình TexAPI riêng. PigTex sẽ không dùng credits TexAPI mặc định cho kết nối này.',
+        texapiApiKeyPlaceholder: 'Để trống để PigTex tự dùng TexAPI mặc định, hoặc nhập API key TexAPI của bạn',
         texapiCreditsTitle: 'TexAPI credits',
-        texapiCreditsDescription: 'PigTex sẽ tự lo token gateway và usage cho provider này.',
+        texapiCreditsDescription: 'Chỉ áp dụng khi bạn để trống API key và dùng Base URL mặc định của TexAPI trên PigTex.',
         texapiRemaining: 'Còn lại',
         texapiUsed: 'Đã dùng',
         texapiRequests: 'Lượt gọi',
@@ -771,9 +773,11 @@ const SettingsModal = ({
         providerManagedBaseUrlHint: 'This Base URL is controlled by another configuration layer.',
         providerManagedTestHint: 'This provider does not support client-side connection testing.',
         providerManagedTexapiConnectionHint: 'TexAPI on this screen is managed by PigTex for your account.',
-        providerManagedTexapiHint: 'TexAPI on PigTex uses credits managed by PigTex, so you do not paste a TexAPI key here. If you see model families such as Qwen, DeepSeek, or GPT, they are still being served through the TexAPI gateway and billed against this PigTex account\'s TexAPI credits. If you want to use your own key, switch to OpenAI, Google, Anthropic, or Alibaba.',
+        providerManagedTexapiHint: 'TexAPI works like a normal provider here: you can enter your own API key and Base URL. If you leave the API key empty and keep the default Base URL, PigTex will automatically use the partner gateway and the TexAPI credits included for this account.',
+        texapiByokHint: 'You are using your own TexAPI configuration. PigTex included credits are not used for this connection.',
+        texapiApiKeyPlaceholder: 'Leave empty to use PigTex managed TexAPI, or enter your own TexAPI API key',
         texapiCreditsTitle: 'TexAPI credits',
-        texapiCreditsDescription: 'PigTex manages the gateway token and usage for this provider.',
+        texapiCreditsDescription: 'Only applies when the API key is empty and the default PigTex TexAPI Base URL is used.',
         texapiRemaining: 'Remaining',
         texapiUsed: 'Used',
         texapiRequests: 'Requests',
@@ -995,8 +999,16 @@ const SettingsModal = ({
     const currentProviderConfig = providerCatalog.find((provider) => provider.id === selectedPublicProviderId)
         || getApiProviderCatalogEntryForSelection(draft.apiProvider, draft.customEndpoint)
     const providerManagedByServer = Boolean(currentProviderConfig.managed_by_server)
-    const providerAcceptsClientCredentials = currentProviderConfig.supports_byok && !providerManagedByServer
+    const providerAcceptsClientCredentials = Boolean(currentProviderConfig.supports_byok)
     const isTexApiManagedProvider = selectedPublicProviderId === 'texapi'
+    const texApiDefaultBaseUrl = normalizeBaseUrlInput(
+        currentProviderConfig.default_base_url || getPublicProviderDefaultBaseUrl('texapi')
+    )
+    const isTexApiManagedFallback = Boolean(
+        isTexApiManagedProvider
+        && !draft.apiKey.trim()
+        && normalizeBaseUrlInput(draft.baseUrl || currentProviderConfig.default_base_url || '') === texApiDefaultBaseUrl
+    )
     const providerManagedConnectionHint = isTexApiManagedProvider
         ? copy.providerManagedTexapiConnectionHint
         : copy.providerManagedConnectionHint
@@ -1080,10 +1092,13 @@ const SettingsModal = ({
             const nextProvider = nextSelection.apiProvider
             const nextCustomEndpoint = nextSelection.customEndpoint
             const nextProfile = profiles[nextProvider]
-            const acceptsClientCredentials = providerCfg.supports_byok && !providerCfg.managed_by_server
+            const acceptsClientCredentials = Boolean(providerCfg.supports_byok)
             const nextApiKey = acceptsClientCredentials ? (nextProfile?.apiKey || '') : ''
-            const nextBaseUrl = providerCfg.managed_by_server
-                ? (providerCfg.default_base_url || '')
+            const nextBaseUrl = nextProvider === 'auto'
+                ? normalizeProfileBaseUrl(
+                    nextProvider,
+                    nextProfile?.baseUrl || providerCfg.default_base_url || ''
+                )
                 : normalizeProfileBaseUrl(
                     nextProvider,
                     providerCfg.default_base_url || nextProfile?.baseUrl || ''
@@ -1118,7 +1133,7 @@ const SettingsModal = ({
             setIsLoadingModels(true)
             setModelsError(null)
 
-            const modelRequest = providerAcceptsClientCredentials
+            const modelRequest = providerAcceptsClientCredentials && draft.apiKey.trim()
                 ? (() => {
                     const apiKey = draft.apiKey.trim()
                     const baseUrl = normalizeBaseUrlInput(draft.baseUrl)
@@ -1136,7 +1151,9 @@ const SettingsModal = ({
                     }
                     return getModelsWithCredentials(apiKey, baseUrl, effectiveProvider, { includeAllReturnedModels: true })
                 })()
-                : getModels(modelReloadTick > 0)
+                : isTexApiManagedFallback
+                    ? getModels(modelReloadTick > 0)
+                    : Promise.resolve<AIModel[]>([])
 
             modelRequest
                 .then((models: AIModel[]) => {
@@ -1150,7 +1167,7 @@ const SettingsModal = ({
                     const message = error instanceof Error ? error.message : copy.modelLoadFailed
                     const normalized = message.toLowerCase()
                     if (
-                        isTexApiManagedProvider
+                        isTexApiManagedFallback
                         && (
                             normalized.includes('401')
                             || normalized.includes('403')
@@ -1187,14 +1204,14 @@ const SettingsModal = ({
         draft.apiProvider,
         draft.customEndpoint,
         effectiveProvider,
-        isTexApiManagedProvider,
+        isTexApiManagedFallback,
         isOpen,
         modelReloadTick
     ])
 
     useEffect(() => {
         if (!isOpen || activeTab !== 'connection') return
-        if (!isTexApiManagedProvider) {
+        if (!isTexApiManagedFallback) {
             setTexApiUsage(null)
             setTexApiUsageError(null)
             setIsLoadingTexApiUsage(false)
@@ -1234,7 +1251,7 @@ const SettingsModal = ({
         copy.texapiSignInHint,
         copy.texapiUsageLoadFailed,
         isOpen,
-        isTexApiManagedProvider,
+        isTexApiManagedFallback,
         texApiUsageReloadTick,
         user?.id,
     ])
@@ -1347,13 +1364,13 @@ const SettingsModal = ({
     }
 
     const handleTestConnection = async () => {
-        if (!providerAcceptsClientCredentials) {
+        if (!providerAcceptsClientCredentials && !isTexApiManagedFallback) {
             showInfo(copy.providerManagedTestHint)
             return
         }
         const apiKey = draft.apiKey.trim()
         const baseUrl = normalizeBaseUrlInput(draft.baseUrl)
-        if (!apiKey) {
+        if (!apiKey && !isTexApiManagedFallback) {
             showInfo(copy.enterApiKeyToTest)
             return
         }
@@ -2587,7 +2604,13 @@ const SettingsModal = ({
                                                                     providerCredentialProfiles: profiles,
                                                                 }
                                                             })}
-                                                            placeholder={providerManagedByServer ? providerManagedConnectionHint : copy.getKey}
+                                                            placeholder={
+                                                                providerManagedByServer
+                                                                    ? providerManagedConnectionHint
+                                                                    : isTexApiManagedProvider
+                                                                        ? copy.texapiApiKeyPlaceholder
+                                                                        : copy.getKey
+                                                            }
                                                             disabled={providerManagedByServer}
                                                             className="stg-input"
                                                         />
@@ -2644,12 +2667,12 @@ const SettingsModal = ({
                                                 {isTexApiManagedProvider && (
                                                     <div className="stg-field">
                                                         <div className="stg-inline-note">
-                                                            {copy.providerManagedTexapiHint}
+                                                            {isTexApiManagedFallback ? copy.providerManagedTexapiHint : copy.texapiByokHint}
                                                         </div>
                                                     </div>
                                                 )}
 
-                                                {isTexApiManagedProvider && (
+                                                {isTexApiManagedFallback && (
                                                     <div className="stg-field">
                                                         <div className="stg-field-row">
                                                             <label className="stg-label">{copy.texapiCreditsTitle}</label>
@@ -2756,7 +2779,7 @@ const SettingsModal = ({
                                                     <button
                                                         className="stg-test-btn"
                                                         onClick={handleTestConnection}
-                                                        disabled={isValidating || !providerAcceptsClientCredentials}
+                                                        disabled={isValidating || (!providerAcceptsClientCredentials && !isTexApiManagedFallback)}
                                                         type="button"
                                                     >
                                                         <Plug size={14} />

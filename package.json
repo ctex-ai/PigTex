@@ -1,6 +1,6 @@
 {
   "name": "pigtex",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "AI Knowledge Workstation - Personal AI Assistant",
   "author": "PigTex Team",
   "main": "dist-electron/main.js",

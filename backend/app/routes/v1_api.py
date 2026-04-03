@@ -5742,6 +5742,7 @@ async def validate_provider_key(
         header_base_url=x_api_base_url,
         api_provider=x_api_provider,
     )
+    cfg = await _hydrate_texapi_partner_config(cfg, current_user)
     base_url = cfg.base_url
     provider = cfg.api_provider
     upstream_headers = _build_upstream_auth_headers(cfg)

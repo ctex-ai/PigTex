@@ -500,4 +500,157 @@ class SyncBillingEvent(Base):
     subscription = relationship("SyncBillingSubscription", backref="events")
 
 
+# =============================================================================
+# Guided Learning Models
+# =============================================================================
+
+
+class LearningProgram(Base):
+    """Structured guided-learning program owned by one user."""
+    __tablename__ = "learning_programs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    workspace_id = Column(String(36), ForeignKey("workspaces.id"), nullable=True, index=True)
+
+    title = Column(String(191), nullable=False)
+    topic = Column(String(191), nullable=False)
+    domain = Column(String(64), nullable=False, default="general", server_default="general")
+    goal = Column(Text, nullable=False)
+    outcome_target = Column(Text, nullable=True)
+    current_level = Column(String(32), nullable=False, default="beginner", server_default="beginner")
+    learning_style = Column(String(32), nullable=False, default="guided", server_default="guided")
+    language = Column(String(16), nullable=False, default="vi", server_default="vi")
+    weekly_minutes = Column(Integer, nullable=False, default=180, server_default="180")
+    status = Column(String(32), nullable=False, default="active", server_default="active")
+    metadata_json = Column(Text, nullable=True)
+    target_date = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", backref="learning_programs")
+    workspace = relationship("Workspace", backref="learning_programs")
+    nodes = relationship(
+        "LearningProgramNode",
+        back_populates="program",
+        order_by="LearningProgramNode.position",
+        cascade="all, delete-orphan",
+    )
+    sessions = relationship(
+        "LearningSession",
+        back_populates="program",
+        order_by="LearningSession.started_at",
+        cascade="all, delete-orphan",
+    )
+
+
+class LearningProgramNode(Base):
+    """One teachable node inside a guided-learning program."""
+    __tablename__ = "learning_program_nodes"
+    __table_args__ = (
+        UniqueConstraint("program_id", "position", name="uq_learning_program_nodes_program_position"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    program_id = Column(String(36), ForeignKey("learning_programs.id"), nullable=False, index=True)
+
+    position = Column(Integer, nullable=False)
+    node_key = Column(String(64), nullable=False)
+    stage = Column(String(64), nullable=False)
+    title = Column(String(191), nullable=False)
+    summary = Column(Text, nullable=False)
+    explanation = Column(Text, nullable=False)
+    worked_example = Column(Text, nullable=False)
+    practice_task = Column(Text, nullable=False)
+    reflection_prompt = Column(Text, nullable=False)
+    estimated_minutes = Column(Integer, nullable=False, default=30, server_default="30")
+    difficulty = Column(Integer, nullable=False, default=1, server_default="1")
+
+    prerequisites_json = Column(Text, nullable=True)
+    common_pitfalls_json = Column(Text, nullable=True)
+    expected_keywords_json = Column(Text, nullable=True)
+    success_criteria_json = Column(Text, nullable=True)
+    resources_json = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=True)
+
+    mastery_status = Column(String(32), nullable=False, default="locked", server_default="locked")
+    mastery_score = Column(Float, nullable=False, default=0.0, server_default="0")
+    evidence_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_practiced_at = Column(DateTime(timezone=True), nullable=True)
+    review_due_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    program = relationship("LearningProgram", back_populates="nodes")
+    sessions = relationship(
+        "LearningSession",
+        back_populates="node",
+        order_by="LearningSession.started_at",
+        cascade="all, delete-orphan",
+    )
+    assessment_attempts = relationship(
+        "LearningAssessmentAttempt",
+        back_populates="node",
+        order_by="LearningAssessmentAttempt.created_at",
+        cascade="all, delete-orphan",
+    )
+
+
+class LearningSession(Base):
+    """One guided study session for a node."""
+    __tablename__ = "learning_sessions"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    program_id = Column(String(36), ForeignKey("learning_programs.id"), nullable=False, index=True)
+    node_id = Column(String(36), ForeignKey("learning_program_nodes.id"), nullable=False, index=True)
+    conversation_id = Column(String(36), ForeignKey("conversations.id"), nullable=True, index=True)
+
+    status = Column(String(32), nullable=False, default="active", server_default="active")
+    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    lesson_snapshot_json = Column(Text, nullable=True)
+    feedback_json = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", backref="learning_sessions")
+    program = relationship("LearningProgram", back_populates="sessions")
+    node = relationship("LearningProgramNode", back_populates="sessions")
+    conversation = relationship("Conversation", backref="learning_sessions")
+    assessment_attempts = relationship(
+        "LearningAssessmentAttempt",
+        back_populates="session",
+        order_by="LearningAssessmentAttempt.created_at",
+        cascade="all, delete-orphan",
+    )
+
+
+class LearningAssessmentAttempt(Base):
+    """Assessment result for a guided-learning response."""
+    __tablename__ = "learning_assessment_attempts"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    program_id = Column(String(36), ForeignKey("learning_programs.id"), nullable=False, index=True)
+    node_id = Column(String(36), ForeignKey("learning_program_nodes.id"), nullable=False, index=True)
+    session_id = Column(String(36), ForeignKey("learning_sessions.id"), nullable=False, index=True)
+
+    answer_text = Column(Text, nullable=False)
+    score = Column(Float, nullable=False, default=0.0, server_default="0")
+    passed = Column(Boolean, nullable=False, default=False, server_default="0")
+    strengths_json = Column(Text, nullable=True)
+    misconceptions_json = Column(Text, nullable=True)
+    feedback = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user = relationship("User", backref="learning_assessment_attempts")
+    program = relationship("LearningProgram", backref="assessment_attempts")
+    node = relationship("LearningProgramNode", back_populates="assessment_attempts")
+    session = relationship("LearningSession", back_populates="assessment_attempts")
+
+
 

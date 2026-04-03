@@ -123,6 +123,20 @@ const DEFAULT_LOCAL_SESSION_STATE: LocalSessionState = {
 let mainWindow: BrowserWindow | null = null
 let localSessionStateCache: LocalSessionState | null = null
 
+function getDesktopDebugLogPath(): string {
+    return path.join(app.getPath('userData'), 'desktop-debug.log')
+}
+
+function appendDesktopDebugLog(message: string): void {
+    try {
+        const logPath = getDesktopDebugLogPath()
+        const line = `[${new Date().toISOString()}] ${message}${os.EOL}`
+        writeFileSync(logPath, line, { flag: 'a' })
+    } catch (error) {
+        console.error('Failed to write desktop debug log:', error)
+    }
+}
+
 function normalizePathForComparison(inputPath: string): string {
     return path.resolve(inputPath).replace(/[\\/]+$/, '').toLowerCase()
 }
@@ -1544,12 +1558,117 @@ function createWindow() {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
     }
 
+    appendDesktopDebugLog(`createWindow packaged=${app.isPackaged} preload=${path.join(__dirname, 'preload.js')}`)
+
+    mainWindow.webContents.on('did-start-loading', () => {
+        appendDesktopDebugLog('webContents did-start-loading')
+    })
+
+    mainWindow.webContents.on('dom-ready', () => {
+        appendDesktopDebugLog('webContents dom-ready')
+    })
+
+    mainWindow.webContents.on('did-finish-load', () => {
+        appendDesktopDebugLog(`webContents did-finish-load url=${mainWindow?.webContents.getURL() || 'unknown'}`)
+        void mainWindow?.webContents.executeJavaScript(`
+            (() => {
+                const root = document.getElementById('root');
+                const safeText = (document.body?.innerText || '').slice(0, 300);
+                return {
+                    href: window.location.href,
+                    readyState: document.readyState,
+                    rootChildCount: root ? root.childElementCount : -1,
+                    rootHtmlLength: root ? root.innerHTML.length : -1,
+                    bodyClassName: document.body?.className || '',
+                    bodyBackground: window.getComputedStyle(document.body).backgroundColor,
+                    bodyTextPreview: safeText,
+                };
+            })();
+        `, true)
+            .then((snapshot) => {
+                appendDesktopDebugLog(`renderer snapshot ${JSON.stringify(snapshot)}`)
+                const rootHtmlLength = typeof snapshot === 'object' && snapshot !== null && 'rootHtmlLength' in snapshot
+                    ? Number((snapshot as { rootHtmlLength?: number }).rootHtmlLength ?? -1)
+                    : -1
+
+                if (rootHtmlLength !== 0) {
+                    return
+                }
+
+                const safeLogPath = getDesktopDebugLogPath().replace(/\\/g, '\\\\')
+                void mainWindow?.webContents.executeJavaScript(`
+                    (() => {
+                        const root = document.getElementById('root');
+                        const currentRootLength = root ? root.innerHTML.length : -1;
+                        if (currentRootLength > 0) return false;
+                        document.body.innerHTML = \`
+                            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px;background:#f5f6f8;color:#0f172a;font-family:Inter,Segoe UI,sans-serif;">
+                                <div style="width:min(760px,100%);padding:24px;border:1px solid rgba(0,0,0,0.08);border-radius:16px;background:#ffffff;box-shadow:0 8px 24px rgba(0,0,0,0.08);">
+                                    <p style="margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">PigTex Debug</p>
+                                    <h1 style="margin:0 0 12px;font-size:28px;line-height:1.2;">Renderer bundle did not mount.</h1>
+                                    <p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#475569;">
+                                        HTML da load xong nhung React khong mount vao <code>#root</code>. Thuong day la loi JavaScript hoac module xay ra truoc khi app kip render.
+                                    </p>
+                                    <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#475569;">
+                                        Log file: <code>${safeLogPath}</code>
+                                    </p>
+                                    <p style="margin:0;font-size:14px;line-height:1.6;color:#475569;">
+                                        Hay gui file log nay cho Codex. Neu ban dang mo ban cu, hay chay lai ban preview moi nhat trong <code>release/win-unpacked</code>.
+                                    </p>
+                                </div>
+                            </div>
+                        \`;
+                        return true;
+                    })();
+                `, true)
+                    .then((injected) => {
+                        appendDesktopDebugLog(`renderer empty-root overlay injected=${String(injected)}`)
+                    })
+                    .catch((error) => {
+                        appendDesktopDebugLog(`renderer empty-root overlay failed ${(error as Error).message}`)
+                    })
+            })
+            .catch((error) => {
+                appendDesktopDebugLog(`renderer snapshot failed ${(error as Error).message}`)
+            })
+    })
+
+    mainWindow.webContents.on('did-stop-loading', () => {
+        appendDesktopDebugLog('webContents did-stop-loading')
+    })
+
+    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+        appendDesktopDebugLog(`did-fail-load code=${errorCode} description=${errorDescription} url=${validatedURL}`)
+        console.error('Renderer failed to load:', {
+            errorCode,
+            errorDescription,
+            validatedURL,
+        })
+    })
+
+    mainWindow.webContents.on('render-process-gone', (_event, details) => {
+        appendDesktopDebugLog(`render-process-gone ${JSON.stringify(details)}`)
+        console.error('Renderer process gone:', details)
+    })
+
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+        appendDesktopDebugLog(`console-message level=${level} source=${sourceId}:${line} message=${message}`)
+        if (level >= 2) {
+            console.error(`Renderer console [${level}] ${message} (${sourceId}:${line})`)
+        }
+    })
+
+    if (process.env.PIGTEX_OPEN_DEVTOOLS === '1') {
+        mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
+
     mainWindow.on('closed', () => {
         mainWindow = null
     })
 }
 
 app.whenReady().then(() => {
+    appendDesktopDebugLog(`app.whenReady userData=${app.getPath('userData')}`)
     registerIpcHandlers()
     createWindow()
 

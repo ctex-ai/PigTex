@@ -208,3 +208,59 @@ h4 {
         transform: rotate(360deg);
     }
 }
+
+.app-runtime-error {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-32);
+    background:
+        radial-gradient(circle at top right, var(--color-accent-soft), transparent 28%),
+        var(--surface-base);
+}
+
+.app-runtime-error-card {
+    width: min(640px, 100%);
+    display: grid;
+    gap: var(--sp-16);
+    padding: var(--sp-32);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    background: var(--surface-elevated);
+    box-shadow: var(--shadow-lg);
+}
+
+.app-runtime-error-kicker {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-bold);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-text-tertiary);
+}
+
+.app-runtime-error-copy {
+    color: var(--color-text-secondary);
+}
+
+.app-runtime-error-btn {
+    width: fit-content;
+    padding: var(--sp-8) var(--sp-16);
+    border-radius: var(--radius-xl);
+    color: white;
+    background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
+    box-shadow: 0 6px 18px var(--color-accent-glow);
+}
+
+.app-runtime-error-details {
+    overflow: auto;
+    padding: var(--sp-16);
+    border-radius: var(--radius-lg);
+    background: var(--surface-base);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+    word-break: break-word;
+}

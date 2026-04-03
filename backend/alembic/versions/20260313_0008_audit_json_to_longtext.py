@@ -20,6 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name != "mysql":
+        return
     # MySQL TEXT caps at 65 535 bytes which is too small for large skill
     # registry snapshots.  Switch the three JSON audit columns to LONGTEXT
     # (up to 4 GiB).
@@ -34,6 +36,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if op.get_bind().dialect.name != "mysql":
+        return
     for col in ("before_json", "after_json", "metadata_json"):
         op.alter_column(
             "admin_audit_events",

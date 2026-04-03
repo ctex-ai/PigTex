@@ -138,6 +138,14 @@
     opacity: 0.8;
 }
 
+.mention-type-conversation .mention-item-icon {
+    color: #22c55e;
+}
+
+.mention-type-conversation .mention-item-icon svg {
+    opacity: 0.8;
+}
+
 .mention-item-emoji {
     font-size: 14px;
     line-height: 1;
@@ -155,6 +163,10 @@
 
 .mention-type-folder .mention-item-name {
     color: var(--color-accent, #818cf8);
+}
+
+.mention-type-conversation .mention-item-name {
+    color: #86efac;
 }
 
 /* Item path */
@@ -253,6 +265,12 @@
     background: rgba(251, 191, 36, 0.08);
     color: #fbbf24;
     border-color: rgba(251, 191, 36, 0.15);
+}
+
+.chat-mention-chip-conversation {
+    background: rgba(34, 197, 94, 0.1);
+    color: #86efac;
+    border-color: rgba(34, 197, 94, 0.16);
 }
 
 .chat-mention-chip:hover {

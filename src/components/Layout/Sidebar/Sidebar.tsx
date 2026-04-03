@@ -26,7 +26,11 @@ import {
     updateWorkspace,
     deleteWorkspace as deleteWorkspaceApi,
     getConversations,
+    getLearningPrograms,
+    getLearningReviews,
     deleteConversation,
+    LearningProgramSummary,
+    LearningReviewItem,
     Workspace,
     Conversation
 } from '../../../services/api'
@@ -46,6 +50,8 @@ interface SidebarProps {
     selectedConversationId: string | null
     onConversationSelect: (conversationId: string | null) => void
     onNewChat: (workspaceId: string | null) => void
+    selectedLearningProgramId?: string | null
+    onLearningProgramSelect?: (program: { id: string; title: string; workspaceId: string | null }) => void
     isAdmin?: boolean
     onOpenAdmin?: () => void
     onOpenSettings?: () => void
@@ -83,6 +89,8 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
     selectedConversationId,
     onConversationSelect,
     onNewChat,
+    selectedLearningProgramId = null,
+    onLearningProgramSelect,
     isAdmin = false,
     onOpenAdmin,
     onOpenSettings,
@@ -90,7 +98,7 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
     isInstallingDesktopUpdate = false,
     onInstallDesktopUpdate
 }, ref) => {
-    const { isVietnamese } = useI18n()
+    const { isVietnamese, locale } = useI18n()
     const { user } = useAuth()
     const copy = isVietnamese ? {
         user: 'Người dùng',
@@ -101,6 +109,18 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
         collapseSidebar: 'Thu gọn thanh bên',
         search: 'Tìm kiếm...',
         chats: 'Chat',
+        learn: 'Học',
+        reviews: 'Ôn lại',
+        reviewDueBadge: (count: number) => `${count} đến hạn`,
+        noLearningPrograms: 'Chưa có lộ trình học',
+        noReviewsDue: 'Chưa có mục ôn lại',
+        continueProgram: 'Tiếp tục lộ trình',
+        reviewNode: 'Ôn mục này',
+        reviewDueAt: 'Đến hạn ôn',
+        nextNode: 'Mục tiếp theo',
+        workspaceScope: 'Workspace',
+        standaloneScope: 'Độc lập',
+        progressCompact: (done: number, total: number) => `${done}/${total} mục`,
         noWorkspace: 'Không workspace',
         newLabel: 'Mới',
         createStandaloneChat: 'Tạo chat độc lập',
@@ -134,6 +154,18 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
         collapseSidebar: 'Collapse sidebar',
         search: 'Search...',
         chats: 'Chats',
+        learn: 'Learn',
+        reviews: 'Reviews',
+        reviewDueBadge: (count: number) => `${count} due`,
+        noLearningPrograms: 'No learning programs yet',
+        noReviewsDue: 'No reviews due',
+        continueProgram: 'Continue program',
+        reviewNode: 'Review this node',
+        reviewDueAt: 'Review due',
+        nextNode: 'Next node',
+        workspaceScope: 'Workspace',
+        standaloneScope: 'Standalone',
+        progressCompact: (done: number, total: number) => `${done}/${total} nodes`,
         noWorkspace: 'No workspace',
         newLabel: 'New',
         createStandaloneChat: 'Create standalone chat',
@@ -191,8 +223,11 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
     const [workspaces, setWorkspaces] = useState<Workspace[]>([])
     const [conversations, setConversations] = useState<Record<string, Conversation[]>>({})
     const [standaloneChats, setStandaloneChats] = useState<Conversation[]>([])
+    const [learningPrograms, setLearningPrograms] = useState<LearningProgramSummary[]>([])
+    const [learningReviews, setLearningReviews] = useState<LearningReviewItem[]>([])
     const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set())
     const [isLoading, setIsLoading] = useState(true)
+    const [isLearningLoading, setIsLearningLoading] = useState(true)
 
     // Create workspace modal state
     const [showCreateModal, setShowCreateModal] = useState(false)
@@ -229,6 +264,26 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
         }
     }, [])
 
+    const fetchLearningPrograms = useCallback(async () => {
+        try {
+            const data = await getLearningPrograms()
+            setLearningPrograms(data)
+        } catch (error) {
+            console.error('Failed to fetch learning programs:', error)
+        } finally {
+            setIsLearningLoading(false)
+        }
+    }, [])
+
+    const fetchLearningReviews = useCallback(async () => {
+        try {
+            const data = await getLearningReviews()
+            setLearningReviews(data)
+        } catch (error) {
+            console.error('Failed to fetch learning reviews:', error)
+        }
+    }, [])
+
     const fetchWorkspaceConversations = useCallback(async (workspaceId: string) => {
         try {
             const data = await getConversations(workspaceId)
@@ -242,17 +297,25 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
         setWorkspaces([])
         setConversations({})
         setStandaloneChats([])
+        setLearningPrograms([])
+        setLearningReviews([])
         setExpandedWorkspaces(new Set())
         setIsLoading(true)
+        setIsLearningLoading(true)
 
         void fetchWorkspaces()
         void fetchStandaloneChats()
-    }, [fetchStandaloneChats, fetchWorkspaces, user?.id])
+        void fetchLearningPrograms()
+        void fetchLearningReviews()
+    }, [fetchLearningPrograms, fetchLearningReviews, fetchStandaloneChats, fetchWorkspaces, user?.id])
 
     useEffect(() => {
         const handleConversationUpdated = (event: Event) => {
             const detail = (event as CustomEvent<{ workspaceId?: string | null }>).detail
             const workspaceScope = detail?.workspaceId
+
+            void fetchLearningPrograms()
+            void fetchLearningReviews()
 
             if (workspaceScope === null || workspaceScope === '') {
                 void fetchStandaloneChats()
@@ -273,6 +336,8 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
         const handleCloudRestoreApplied = () => {
             void fetchWorkspaces()
             void fetchStandaloneChats()
+            void fetchLearningPrograms()
+            void fetchLearningReviews()
             expandedWorkspaces.forEach((workspaceId) => {
                 void fetchWorkspaceConversations(workspaceId)
             })
@@ -284,7 +349,7 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
             window.removeEventListener('pigtex:conversation-updated', handleConversationUpdated as EventListener)
             window.removeEventListener('pigtex:cloud-restore-applied', handleCloudRestoreApplied)
         }
-    }, [expandedWorkspaces, fetchStandaloneChats, fetchWorkspaceConversations, fetchWorkspaces])
+    }, [expandedWorkspaces, fetchLearningPrograms, fetchLearningReviews, fetchStandaloneChats, fetchWorkspaceConversations, fetchWorkspaces])
 
     useEffect(() => {
         if (!selectedWorkspaceId) return
@@ -337,6 +402,37 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
             void fetchStandaloneChats()
         }
     }
+
+    const formatLearningDate = useCallback((value?: string | null) => {
+        if (!value) return ''
+        const date = new Date(value)
+        if (Number.isNaN(date.getTime())) return value
+        return new Intl.DateTimeFormat(locale, {
+            day: '2-digit',
+            month: 'short'
+        }).format(date)
+    }, [locale])
+
+    const handleOpenLearningProgram = useCallback((program: LearningProgramSummary) => {
+        onWorkspaceSelect(program.workspace_id ?? null)
+        onConversationSelect(null)
+        onLearningProgramSelect?.({
+            id: program.id,
+            title: program.title,
+            workspaceId: program.workspace_id ?? null
+        })
+    }, [onConversationSelect, onLearningProgramSelect, onWorkspaceSelect])
+
+    const handleOpenLearningReview = useCallback((review: LearningReviewItem) => {
+        const matchedProgram = learningPrograms.find(program => program.id === review.program_id)
+        onWorkspaceSelect(matchedProgram?.workspace_id ?? null)
+        onConversationSelect(null)
+        onLearningProgramSelect?.({
+            id: review.program_id,
+            title: review.program_title,
+            workspaceId: matchedProgram?.workspace_id ?? null
+        })
+    }, [learningPrograms, onConversationSelect, onLearningProgramSelect, onWorkspaceSelect])
 
     const closeRenameModal = () => {
         setShowRenameModal(false)
@@ -563,6 +659,90 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
                                     </button>
                                 </button>
                             ))
+                        )}
+                    </div>
+                </div>
+
+                <div className="sidebar-section">
+                    <div className="sidebar-section-header">
+                        <span className="sidebar-section-title">{copy.learn}</span>
+                        {learningReviews.length > 0 && (
+                            <span className="sidebar-section-badge sidebar-section-badge-accent">
+                                {copy.reviewDueBadge(learningReviews.length)}
+                            </span>
+                        )}
+                    </div>
+                    <div className="sidebar-items learning-sidebar-items">
+                        {isLearningLoading ? (
+                            <div className="sidebar-loading">{copy.loading}</div>
+                        ) : (
+                            <>
+                                {learningReviews.length > 0 ? (
+                                    <div className="learning-review-list">
+                                        {learningReviews.slice(0, 3).map((review) => (
+                                            <button
+                                                key={`${review.program_id}-${review.node?.id ?? 'review'}`}
+                                                className="learning-review-card"
+                                                onClick={() => handleOpenLearningReview(review)}
+                                                title={copy.reviewNode}
+                                            >
+                                                <div className="learning-review-card-header">
+                                                    <span className="learning-review-card-title">
+                                                        {review.node?.title || review.program_title}
+                                                    </span>
+                                                    {review.node?.review_due_at && (
+                                                        <span className="learning-review-card-date">
+                                                            {formatLearningDate(review.node.review_due_at)}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="learning-review-card-program">{review.program_title}</div>
+                                                {review.node?.summary && (
+                                                    <div className="learning-review-card-summary">{review.node.summary}</div>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : learningPrograms.length > 0 ? (
+                                    <div className="sidebar-empty-hint">{copy.noReviewsDue}</div>
+                                ) : null}
+
+                                {learningPrograms.length === 0 ? (
+                                    <div className="sidebar-empty-hint">{copy.noLearningPrograms}</div>
+                                ) : (
+                                    <div className="learning-program-list">
+                                        {learningPrograms.slice(0, 4).map((program) => (
+                                            <button
+                                                key={program.id}
+                                                className={`learning-program-card ${program.id === selectedLearningProgramId ? 'active' : ''}`}
+                                                onClick={() => handleOpenLearningProgram(program)}
+                                                title={copy.continueProgram}
+                                            >
+                                                <div className="learning-program-card-header">
+                                                    <span className="learning-program-card-title">{program.title}</span>
+                                                    <span className="learning-program-card-scope">
+                                                        {program.workspace_name
+                                                            ? `${copy.workspaceScope} / ${program.workspace_name}`
+                                                            : copy.standaloneScope}
+                                                    </span>
+                                                </div>
+                                                <div className="learning-program-card-meta">
+                                                    <span>{copy.progressCompact(program.completed_nodes, program.total_nodes)}</span>
+                                                    {program.due_review_count > 0 && (
+                                                        <span>{copy.reviewDueBadge(program.due_review_count)}</span>
+                                                    )}
+                                                </div>
+                                                {program.next_node_title && (
+                                                    <div className="learning-program-card-next">
+                                                        <span className="learning-program-card-next-label">{copy.nextNode}</span>
+                                                        <span className="learning-program-card-next-value">{program.next_node_title}</span>
+                                                    </div>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>

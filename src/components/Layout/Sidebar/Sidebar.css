@@ -361,6 +361,12 @@
     letter-spacing: 0.01em;
 }
 
+.sidebar-section-badge-accent {
+    color: var(--color-accent);
+    background: var(--color-accent-soft);
+    border-color: var(--color-accent-glow);
+}
+
 .sidebar-section-create-btn {
     display: inline-flex;
     align-items: center;
@@ -456,6 +462,113 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     font-style: italic;
+}
+
+.learning-sidebar-items {
+    gap: 10px;
+    padding: 0 10px;
+}
+
+.learning-review-list,
+.learning-program-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.learning-review-card,
+.learning-program-card {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    background:
+        radial-gradient(circle at top right, rgba(99, 102, 241, 0.08), transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.98));
+    color: var(--color-text-primary);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+    transition: transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out), border-color 0.2s var(--ease-out);
+}
+
+.learning-review-card:hover,
+.learning-program-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--color-accent-glow);
+    box-shadow: 0 14px 30px rgba(99, 102, 241, 0.1);
+}
+
+.learning-program-card.active {
+    border-color: var(--color-border-accent);
+    box-shadow:
+        0 16px 34px rgba(99, 102, 241, 0.12),
+        0 0 0 1px var(--color-accent-glow) inset;
+}
+
+.learning-review-card-header,
+.learning-program-card-header,
+.learning-program-card-meta {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.learning-review-card-title,
+.learning-program-card-title {
+    font-size: 13px;
+    font-weight: var(--weight-semibold);
+    line-height: 1.4;
+    color: var(--color-text-primary);
+}
+
+.learning-review-card-date,
+.learning-program-card-scope,
+.learning-program-card-meta,
+.learning-review-card-program,
+.learning-review-card-summary,
+.learning-program-card-next-label,
+.learning-program-card-next-value {
+    font-size: 11px;
+}
+
+.learning-review-card-date,
+.learning-program-card-scope {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+}
+
+.learning-program-card-scope {
+    text-align: right;
+}
+
+.learning-program-card-meta,
+.learning-review-card-program {
+    color: var(--color-text-secondary);
+}
+
+.learning-review-card-summary,
+.learning-program-card-next-value {
+    color: var(--color-text-muted);
+    line-height: 1.45;
+}
+
+.learning-program-card-next {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 2px;
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.learning-program-card-next-label {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: var(--weight-bold);
+    color: var(--color-text-muted);
 }
 
 /* ═══════════════════════════════════════════════════════════

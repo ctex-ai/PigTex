@@ -12,19 +12,25 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 
 // ===== Types =====
 
+export type MentionType = 'file' | 'folder' | 'conversation'
+
 export interface MentionItem {
-    /** 'file' or 'folder' */
-    type: 'file' | 'folder'
+    /** 'file', 'folder', or 'conversation' */
+    type: MentionType
     /** Relative path from workspace root */
     relativePath: string
     /** Display name (file/folder name) */
     name: string
     /** Full absolute path */
     absolutePath: string
+    /** Stable reference id for non-filesystem mentions */
+    referenceId?: string
+    /** Optional secondary label shown in the picker */
+    subtitle?: string
 }
 
 export interface MentionToken {
-    type: 'file' | 'folder'
+    type: MentionType
     relativePath: string
     absolutePath: string
     name: string
@@ -50,7 +56,7 @@ const INITIAL_STATE: MentionPopupState = {
 }
 
 // Mention token format: [[@type:relativePath]]
-const MENTION_REGEX = /\[\[@(file|folder):([^\]]+)\]\]/g
+const MENTION_REGEX = /\[\[@(file|folder|conversation):([^\]]+)\]\]/g
 
 // ===== Parse mentions from text =====
 
@@ -61,7 +67,7 @@ export function parseMentions(text: string): MentionToken[] {
     const regex = new RegExp(MENTION_REGEX.source, 'g')
     while ((match = regex.exec(text)) !== null) {
         mentions.push({
-            type: match[1] as 'file' | 'folder',
+            type: match[1] as MentionType,
             relativePath: match[2],
             absolutePath: '', // will be resolved at send time
             name: match[2].split(/[/\\]/).pop() || match[2]
@@ -97,12 +103,16 @@ export function getMentionDisplayText(mention: MentionToken): string {
 
 export function buildMentionAwareMessageText(
     promptText: string,
-    mentions: Array<Pick<MentionItem, 'type' | 'relativePath'>>,
+    mentions: Array<Pick<MentionItem, 'type' | 'relativePath' | 'name'>>,
     fallbackAttachmentText: string = ''
 ): string {
     const normalizedPrompt = promptText.trim()
     const mentionSummary = mentions
-        .map((mention) => `@${mention.type}:${mention.relativePath}`)
+        .map((mention) =>
+            mention.type === 'conversation'
+                ? `@conversation:${mention.name || mention.relativePath}`
+                : `@${mention.type}:${mention.relativePath}`
+        )
         .join(', ')
     const normalizedFallback = fallbackAttachmentText.trim()
 
@@ -180,6 +190,7 @@ export function filterMentionItems(
     for (const item of items) {
         const nameLower = item.name.toLowerCase()
         const pathLower = item.relativePath.toLowerCase()
+        const subtitleLower = (item.subtitle || '').toLowerCase()
 
         let score = 0
         // Exact name match
@@ -190,18 +201,25 @@ export function filterMentionItems(
         else if (nameLower.includes(q)) score = 60
         // Path contains query
         else if (pathLower.includes(q)) score = 40
+        // Subtitle contains query
+        else if (subtitleLower.includes(q)) score = 35
         else continue
 
         // Boost folders slightly for short queries
         if (item.type === 'folder' && q.length <= 3) score += 5
+        if (item.type === 'conversation') score += 2
 
         scored.push({ item, score })
     }
 
     scored.sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score
-        // Sort by type (folders first), then name
-        if (a.item.type !== b.item.type) return a.item.type === 'folder' ? -1 : 1
+        const typeOrder = (type: MentionType) => {
+            if (type === 'conversation') return 0
+            if (type === 'folder') return 1
+            return 2
+        }
+        if (a.item.type !== b.item.type) return typeOrder(a.item.type) - typeOrder(b.item.type)
         return a.item.name.localeCompare(b.item.name)
     })
 

@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
+﻿import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useMemo } from 'react'
 import {
     Send,
     Sparkles,
@@ -41,7 +42,9 @@ import {
     WebSearchClaimVerification,
     WebSearchMetadata,
     MemoryContextMetadata,
+    getLocalConversations,
     getLocalConversation,
+    getLearningLiveState,
     createConversation,
     addConversationMessage,
     updateConversationMessage,
@@ -60,6 +63,7 @@ import {
     modelSupportsCapability,
     transportSupportsCapability
 } from '../../../services/api'
+import type { LearningChatMetadata, LearningLiveState, LearningState } from '../../../services/api'
 import { PigTexSettings, resolveApiProviderForRequest } from '../../../services/settings'
 import { useI18n } from '../../../contexts/I18nContext'
 import MessageRenderer from '../../Shared/MessageRenderer'
@@ -98,7 +102,6 @@ import {
 } from '../../../features/fileAgent/reviewContext'
 import {
     useMention,
-    buildMentionAwareMessageText,
     flattenFileTree,
     filterMentionItems,
     MentionItem
@@ -125,6 +128,7 @@ const MODEL_SHORTLIST_LIMIT = 5
 const IMAGE_REF_REGEX = /!\[([^\]]*)\]\(([^)]+)\)/g
 const MEDIA_REF_REGEX = /<!--PIGTEX_MEDIA\s+({[\s\S]*?})\s*-->/g
 const VIDEO_TASK_REF_REGEX = /<!--PIGTEX_VIDEO_TASK\s+({[\s\S]*?})\s*-->/g
+const REFERENCE_METADATA_REGEX = /<!--PIGTEX_REFERENCES\s+({[\s\S]*?})\s*-->/g
 const OPENAI_VOICE_PRESETS = ['alloy', 'ash', 'coral', 'echo', 'sage', 'shimmer']
 const GEMINI_VOICE_PRESETS = ['Kore', 'Aoede', 'Puck', 'Charon', 'Fenrir']
 const ALIBABA_VOICE_PRESETS = ['Cherry', 'Serena', 'Ethan', 'Chelsie']
@@ -974,6 +978,63 @@ function parseVideoTaskRefFromContent(content: string): { text: string; videoTas
     }
 }
 
+function parseStoredReferenceMetadata(content: string): { text: string; mentions: MentionItem[] } {
+    const mentions: MentionItem[] = []
+    const seen = new Set<string>()
+
+    const text = content.replace(REFERENCE_METADATA_REGEX, (_match, payload) => {
+        try {
+            const parsed = JSON.parse(payload) as { items?: unknown }
+            const items = Array.isArray(parsed.items) ? parsed.items : []
+
+            for (const rawItem of items) {
+                if (!rawItem || typeof rawItem !== 'object') continue
+
+                const candidate = rawItem as Record<string, unknown>
+                const type = candidate.type === 'file' || candidate.type === 'folder' || candidate.type === 'conversation'
+                    ? candidate.type
+                    : null
+                const relativePath = typeof candidate.relativePath === 'string'
+                    ? candidate.relativePath.trim()
+                    : ''
+                const name = typeof candidate.name === 'string' && candidate.name.trim()
+                    ? candidate.name.trim()
+                    : relativePath.split(/[/\\]/).pop() || relativePath
+                const referenceId = typeof candidate.referenceId === 'string' && candidate.referenceId.trim()
+                    ? candidate.referenceId.trim()
+                    : undefined
+                const subtitle = typeof candidate.subtitle === 'string' && candidate.subtitle.trim()
+                    ? candidate.subtitle.trim()
+                    : undefined
+
+                if (!type || (!relativePath && !referenceId)) continue
+
+                const mention: MentionItem = {
+                    type,
+                    relativePath: relativePath || name,
+                    name: name || relativePath || referenceId || '',
+                    absolutePath: '',
+                    referenceId,
+                    subtitle
+                }
+                const key = `${mention.type}:${mention.referenceId || mention.relativePath}`
+                if (seen.has(key)) continue
+                seen.add(key)
+                mentions.push(mention)
+            }
+        } catch {
+            return ''
+        }
+
+        return ''
+    })
+
+    return {
+        text: text.replace(/\n{3,}/g, '\n\n').trim(),
+        mentions
+    }
+}
+
 async function blobToDataUrl(blob: Blob): Promise<string> {
     return await new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -1060,6 +1121,8 @@ interface ChatPanelProps {
     onFileOpen?: (fileId: string) => void
     conversationId?: string | null
     workspaceId?: string | null
+    learningProgramId?: string | null
+    learningProgramTitle?: string | null
     newChatToken?: number
     onConversationCreated?: (conversationId: string) => void
     onConversationInvalidated?: () => void
@@ -1097,8 +1160,13 @@ const conversationModes = [
         label: 'Deep',
         description: 'Plan/checklist kỹ hơn, loop tool chặt hơn'
     },
+    {
+        id: 'learn',
+        label: 'Learn',
+        description: 'Tutor mode with goal, checklist, evidence, and memory'
+    },
 ]
-type ConversationModeId = 'fast' | 'deep'
+type ConversationModeId = 'fast' | 'deep' | 'learn'
 
 type ConversationMode = {
     id: ConversationModeId
@@ -1133,7 +1201,8 @@ const attachOptions = [
 
 const MAX_AI_AGENT_STEPS_BY_MODE: Record<ConversationModeId, { base: number; complex: number; max: number }> = {
     fast: { base: 2, complex: 3, max: 4 },
-    deep: { base: 4, complex: 5, max: 6 }
+    deep: { base: 4, complex: 5, max: 6 },
+    learn: { base: 3, complex: 4, max: 5 }
 }
 const MAX_AI_AGENT_RUNTIME_MS = 120000
 const MAX_DIFF_INPUT_LINES = 260
@@ -1147,11 +1216,32 @@ const STREAM_DIRECT_RENDER_BACKLOG = 24
 const STREAM_ARTIFACT_SCAN_WINDOW_CHARS = 1200
 const MAX_MENTION_CONTEXT_ITEMS = 6
 const MAX_MENTION_FILE_CHARS = 4000
+const MAX_CONVERSATION_MENTION_ITEMS = 3
+const MAX_CONVERSATION_MENTION_MESSAGES = 12
+const MAX_CONVERSATION_MENTION_MESSAGE_CHARS = 1400
+const MAX_CONVERSATION_MENTION_TOTAL_CHARS = 12000
 const COMPLEXITY_HINT_RE = /(compare|analysis|research|debug|root cause|refactor|architecture|plan|roadmap|trade-off|audit|benchmark|migrate|phân tích|so sánh|đánh giá|kế hoạch|kiến trúc|tối ưu|kiểm tra|điều tra|xử lý lỗi)/i
 const VERIFICATION_HINT_RE = /(verify|fact check|citation|source|evidence|legal|medical|finance|security|latest|today|news|price|xác minh|kiểm chứng|nguồn|bằng chứng|pháp lý|y tế|tài chính|bảo mật|mới nhất|hôm nay|tin tức|giá)/i
 const LIST_HINT_RE = /(^|\n)\s*(?:[-*]|\d+[.)])\s+/m
 const AGENT_PREFIX_RE = /^\[(?:agent|Agent)\]\s*/i
 const AGENT_BULLET_RE = /^[•\-]\s*/
+
+const isFilesystemMention = (mention: MentionItem): mention is MentionItem & { type: 'file' | 'folder' } => (
+    mention.type === 'file' || mention.type === 'folder'
+)
+
+const isConversationMention = (mention: MentionItem): mention is MentionItem & { type: 'conversation'; referenceId: string } => (
+    mention.type === 'conversation'
+    && typeof mention.referenceId === 'string'
+    && mention.referenceId.trim().length > 0
+)
+
+const truncatePromptSnippet = (value: string, maxChars: number): string => {
+    const normalized = value.trim()
+    if (!normalized) return ''
+    if (normalized.length <= maxChars) return normalized
+    return `${normalized.slice(0, maxChars)}\n... (truncated)`
+}
 
 const normalizeAgentStatusLine = (line: string): string => (
     line
@@ -1200,6 +1290,17 @@ You are in fast mode. Prioritize speed and practical usefulness.
 - If uncertainty remains, state it clearly instead of guessing.
 `.trim()
 
+const MODE_PROMPT_LEARN = `
+## Response Mode: LEARN
+You are in learn mode. Operate as PigTex Learn inside the normal chat UI.
+- Treat the turn as guided learning, not generic assistance.
+- Keep one instructional purpose per turn: diagnose, teach, guided practice, independent practice, review, evaluate, or summarize progress.
+- Track a real target, checklist movement, learner evidence, and memory updates.
+- Do not mark mastery from confidence or agreement alone.
+- If the user provides files, prefer teaching from those materials before general background knowledge.
+- End with a concrete next step that helps verify progress.
+`.trim()
+
 const MODE_PROMPT_DEEP = `
 ## Response Mode: DEEP
 You are in deep mode. Prioritize rigor and completeness.
@@ -1212,7 +1313,8 @@ You are in deep mode. Prioritize rigor and completeness.
 
 const MODE_PENDING_TEXT: Record<ConversationModeId, string> = {
     fast: 'Fast mode đang xử lý nhanh...',
-    deep: 'Deep mode đang lập kế hoạch và kiểm tra kỹ...'
+    deep: 'Deep mode đang lập kế hoạch và kiểm tra kỹ...',
+    learn: 'Learn mode đang dẫn bạn theo lộ trình học...'
 }
 
 const isTransientPendingMessage = (message: string) => {
@@ -1221,6 +1323,7 @@ const isTransientPendingMessage = (message: string) => {
         normalized === 'Đang xử lý yêu cầu...'
         || normalized === MODE_PENDING_TEXT.fast
         || normalized === MODE_PENDING_TEXT.deep
+        || normalized === MODE_PENDING_TEXT.learn
     )
 }
 
@@ -1524,7 +1627,11 @@ const buildModeRuntimeInstruction = (
     modeId: ConversationModeId,
     webSearchPreference: 'auto' | 'force_on'
 ): string => {
-    const basePrompt = modeId === 'deep' ? MODE_PROMPT_DEEP : MODE_PROMPT_FAST
+    const basePrompt = modeId === 'deep'
+        ? MODE_PROMPT_DEEP
+        : modeId === 'learn'
+            ? MODE_PROMPT_LEARN
+            : MODE_PROMPT_FAST
     const searchPrompt = webSearchPreference === 'force_on'
         ? 'Web search is forced ON for this turn. Use fresh evidence and cite sources when web data is used.'
         : 'Web search and tools are AUTO. Decide if they are needed from user intent and risk level.'
@@ -1706,9 +1813,22 @@ const buildStoredMessageContent = (
     text: string,
     images?: ImageAttachment[],
     media?: GeneratedMedia[],
-    videoTask?: GeneratedVideoTask
+    videoTask?: GeneratedVideoTask,
+    mentions?: MentionItem[]
 ) => {
     const normalizedText = text.trim()
+    const mentionList = mentions || []
+    const referenceRef = mentionList.length > 0
+        ? `<!--PIGTEX_REFERENCES ${JSON.stringify({
+            items: mentionList.map((mention) => ({
+                type: mention.type,
+                relativePath: mention.relativePath,
+                name: mention.name,
+                referenceId: mention.referenceId,
+                subtitle: mention.subtitle
+            }))
+        })} -->`
+        : ''
     const imageRefs = (images || [])
         .map((img, index) => {
             const source = (img.serve_url || img.base64_data || '').trim()
@@ -1752,11 +1872,11 @@ const buildStoredMessageContent = (
         })} -->`
         : ''
 
-    if (imageRefs.length === 0 && mediaRefs.length === 0 && !videoTaskRef) {
+    if (imageRefs.length === 0 && mediaRefs.length === 0 && !videoTaskRef && !referenceRef) {
         return normalizedText
     }
 
-    const sections = [normalizedText, imageRefs.join('\n'), mediaRefs.join('\n'), videoTaskRef]
+    const sections = [normalizedText, referenceRef, imageRefs.join('\n'), mediaRefs.join('\n'), videoTaskRef]
         .map(section => section.trim())
         .filter(Boolean)
 
@@ -1898,11 +2018,13 @@ interface UIMessage {
     media?: GeneratedMedia[]
     videoTask?: GeneratedVideoTask
     files?: DocumentAttachment[]
+    mentions?: MentionItem[]
     requestKind?: MessageRequestKind
     usage?: MessageUsageMeta
     memory?: MemoryContextMetadata
     citations?: WebCitation[]
     webSearch?: WebSearchMetadata
+    learning?: LearningChatMetadata
     agentStatus?: {
         text: string
         tone: 'running' | 'success' | 'error' | 'warning' | 'info'
@@ -1942,6 +2064,8 @@ const ChatPanel = ({
     variant,
     conversationId,
     workspaceId,
+    learningProgramId,
+    learningProgramTitle,
     newChatToken,
     onConversationCreated,
     onConversationInvalidated,
@@ -2008,6 +2132,14 @@ const ChatPanel = ({
         conflicts: 'Xung đột',
         sources: 'Nguồn',
         aiSearchDetails: 'Thông tin tìm kiếm AI',
+        learningDetails: 'Chi tiet hoc tap',
+        learningGoal: 'Muc tieu',
+        learningMode: 'Che do',
+        learningNextStep: 'Buoc tiep theo',
+        learningChecklist: 'Checklist',
+        learningEvidence: 'Evidence',
+        learningMemory: 'Memory update',
+        learningSources: 'Nguon',
         suggestedModels: 'Model đề xuất',
         viewAllModels: 'Xem tất cả model',
         showLessModels: 'Thu gọn model',
@@ -2064,7 +2196,7 @@ const ChatPanel = ({
         invalidFileActions: 'AI trả về thao tác tệp không hợp lệ',
         failedToolResponse: 'Không thể xử lý phản hồi tool',
         askAnything: 'Hỏi tôi bất cứ điều gì...',
-        askAnythingMentions: 'Hỏi tôi bất cứ điều gì... (gõ @ để nhắc tới tệp)',
+        askAnythingMentions: 'Hỏi tôi bất cứ điều gì... (gõ @ để nhắc tới file, folder, conversation)',
         attachmentPrompt: 'Mô tả điều bạn muốn làm với tệp đính kèm...',
         describeImageGenerate: 'Mô tả ảnh bạn muốn tạo...',
         describeImageEdit: 'Mô tả cách chỉnh sửa ảnh đính kèm đầu tiên...',
@@ -2212,6 +2344,14 @@ const ChatPanel = ({
         conflicts: 'Conflicts',
         sources: 'Sources',
         aiSearchDetails: 'AI search details',
+        learningDetails: 'Learning details',
+        learningGoal: 'Goal',
+        learningMode: 'Mode',
+        learningNextStep: 'Next step',
+        learningChecklist: 'Checklist',
+        learningEvidence: 'Evidence',
+        learningMemory: 'Memory update',
+        learningSources: 'Sources',
         suggestedModels: 'Suggested models',
         viewAllModels: 'View all models',
         showLessModels: 'Show fewer models',
@@ -2268,7 +2408,7 @@ const ChatPanel = ({
         invalidFileActions: 'AI returned invalid file actions',
         failedToolResponse: 'Failed to process tool response',
         askAnything: 'Ask me anything...',
-        askAnythingMentions: 'Ask me anything... (type @ to mention files)',
+        askAnythingMentions: 'Ask me anything... (type @ to mention files, folders, or conversations)',
         attachmentPrompt: 'Describe what you want to do with the attachment(s)...',
         describeImageGenerate: 'Describe the image you want to generate...',
         describeImageEdit: 'Describe how to edit the first attached image...',
@@ -2372,14 +2512,16 @@ const ChatPanel = ({
     ]
     const greeting = isVietnamese ? 'Chào bạn! Mình là PigTex' : 'Hi there! I’m PigTex'
     const subtitle = isVietnamese
-        ? 'Trợ lý AI tập trung hiệu năng, trả lời nhanh và bám sát công việc.'
-        : 'A high-performance AI assistant built for fast, focused work.'
+        ? 'Trợ lý AI tập trung hiệu năng. Chọn Nhanh, Sâu, hoặc Học ngay ở khung nhập.'
+        : 'A high-performance AI assistant. Pick Fast, Deep, or Learn right from the input bar.'
     const conversationModesLocal: ConversationMode[] = isVietnamese ? [
         { id: 'fast', label: 'Nhanh', description: 'Ưu tiên tốc độ, tự chọn tool tối thiểu' },
         { id: 'deep', label: 'Sâu', description: 'Lập plan/checklist kỹ hơn, lặp tool chặt hơn' },
+        { id: 'learn', label: 'Học', description: 'Tutor mode: bám mục tiêu, checklist, evidence, memory' },
     ] : [
         { id: 'fast', label: 'Fast', description: 'Prioritize speed with minimal tool use' },
         { id: 'deep', label: 'Deep', description: 'Use tighter planning, checklists, and tool loops' },
+        { id: 'learn', label: 'Learn', description: 'Tutor mode with goal, checklist, evidence, and memory' },
     ]
     const imageToolModesLocal: ImageToolMode[] = isVietnamese ? [
         { id: 'chat', label: 'Chat' },
@@ -2405,7 +2547,8 @@ const ChatPanel = ({
     ]
     const modePendingText: Record<ConversationModeId, string> = {
         fast: isVietnamese ? 'Chế độ nhanh đang xử lý...' : 'Fast mode is working...',
-        deep: isVietnamese ? 'Chế độ sâu đang lập kế hoạch và kiểm tra...' : 'Deep mode is planning and checking...'
+        deep: isVietnamese ? 'Chế độ sâu đang lập kế hoạch và kiểm tra...' : 'Deep mode is planning and checking...',
+        learn: isVietnamese ? 'Chế độ học đang theo dõi tiến trình học...' : 'Learn mode is tracking the learning flow...'
     }
     const formatConnectivityIssueMessage = (issue: ApiConnectivityIssue): string => {
         switch (issue.kind) {
@@ -2458,6 +2601,8 @@ const ChatPanel = ({
     const [isPreparingActionDiffs, setIsPreparingActionDiffs] = useState(false)
     const [currentConversationId, setCurrentConversationId] = useState<string | null>(conversationId || null)
     const [conversationWorkspaceId, setConversationWorkspaceId] = useState<string | null>(workspaceId || null)
+    const [learningLiveState, setLearningLiveState] = useState<LearningLiveState | null>(null)
+    const [isLearningLiveLoading, setIsLearningLiveLoading] = useState(false)
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -2501,9 +2646,11 @@ const ChatPanel = ({
     const dragCounterRef = useRef(0)
 
     // ===== @Mention system =====
-    const [mentionItems, setMentionItems] = useState<MentionItem[]>([])
+    const [fileMentionItems, setFileMentionItems] = useState<MentionItem[]>([])
+    const [conversationMentionItems, setConversationMentionItems] = useState<MentionItem[]>([])
     const [currentMentions, setCurrentMentions] = useState<MentionItem[]>([])
     const mention = useMention(textareaRef)
+    const mentionItems = [...conversationMentionItems, ...fileMentionItems]
     const filteredMentionItems = filterMentionItems(mentionItems, mention.popup.query)
 
     const isCentered = variant === 'centered'
@@ -2514,6 +2661,9 @@ const ChatPanel = ({
     const showAddMenu = openComposerMenu === 'add'
     const showImageToolMenu = openComposerMenu === 'imageTool'
     const selectedModeOption = conversationModesLocal.find(mode => mode.id === selectedMode.id) || conversationModesLocal[0]
+    const selectedModeButtonLabel = isVietnamese
+        ? `Chế độ: ${selectedModeOption.label}`
+        : `Mode: ${selectedModeOption.label}`
     const availableImageToolModes = imageToolModesLocal.filter(mode => {
         if (mode.id === 'chat') return true
         if (mode.id === 'image') return transportSupportsCapability(resolvedEndpointProvider, 'image_generation')
@@ -2592,11 +2742,75 @@ const ChatPanel = ({
             minute: '2-digit'
         }).format(date)
     }, [locale])
+    const learningCockpitCopy = isVietnamese ? {
+        cockpitTitle: 'Learn cockpit',
+        focus: 'Focus',
+        goal: 'Target',
+        nextAction: 'Next evidence',
+        deadline: 'Deadline',
+        reviewLoad: 'Review load',
+        remaining: 'Con lai',
+        dueNow: 'Den han',
+        stalled: 'Bi ket',
+        sources: 'Nguon dang uu tien',
+        misconceptions: 'Watch-outs',
+        successSignals: 'Dau hieu dat',
+        minutesPerSession: 'Phut/buoi',
+        sessionsPerWeek: 'Buoi/tuan',
+        loading: 'Dang cap nhat learn state...',
+        noData: 'Gui them muc tieu, bai lam hoac tai lieu de PigTex Learn khoi dong cockpit.',
+    } : {
+        cockpitTitle: 'Learn cockpit',
+        focus: 'Focus',
+        goal: 'Target',
+        nextAction: 'Next evidence',
+        deadline: 'Deadline',
+        reviewLoad: 'Review load',
+        remaining: 'Remaining',
+        dueNow: 'Due now',
+        stalled: 'Stalled',
+        sources: 'Preferred sources',
+        misconceptions: 'Watch-outs',
+        successSignals: 'Success signals',
+        minutesPerSession: 'Mins/session',
+        sessionsPerWeek: 'Sessions/week',
+        loading: 'Refreshing learning state...',
+        noData: 'Send a goal, response, or material to let PigTex Learn initialize the cockpit.',
+    }
+    const getLearningDeadlineStatusLabelLocal = (status?: string | null) => {
+        const normalized = (status || '').trim().toLowerCase()
+        const lookup: Record<string, string> = isVietnamese ? {
+            none: 'Chua co',
+            on_track: 'On track',
+            at_risk: 'Can day pace',
+            urgent: 'Gap'
+        } : {
+            none: 'No deadline',
+            on_track: 'On track',
+            at_risk: 'At risk',
+            urgent: 'Urgent'
+        }
+        return lookup[normalized] || normalized || (isVietnamese ? 'Chua co' : 'No deadline')
+    }
+    const getLearningReviewPressureLabelLocal = (pressure?: string | null) => {
+        const normalized = (pressure || '').trim().toLowerCase()
+        const lookup: Record<string, string> = isVietnamese ? {
+            low: 'Nhe',
+            medium: 'Vua',
+            high: 'Cao'
+        } : {
+            low: 'Low',
+            medium: 'Medium',
+            high: 'High'
+        }
+        return lookup[normalized] || normalized || (isVietnamese ? 'Nhe' : 'Low')
+    }
     const isTransientPendingMessageLocal = (message: string) => {
         const normalized = message.trim()
         return normalized === (isVietnamese ? 'Đang xử lý yêu cầu...' : 'Processing your request...')
             || normalized === modePendingText.fast
             || normalized === modePendingText.deep
+            || normalized === modePendingText.learn
     }
     const getWebSearchStatusLabelLocal = (status: WebSearchMetadata['status']) => {
         switch (status) {
@@ -2627,6 +2841,178 @@ const ChatPanel = ({
                 return ''
         }
     }
+    const getLearningModeLabelLocal = (mode?: string | null) => {
+        const normalized = (mode || '').trim().toLowerCase()
+        if (!normalized) return ''
+
+        const lookup: Record<string, string> = isVietnamese ? {
+            teach: 'Day hoc',
+            teacher: 'Day hoc',
+            explain: 'Giai thich',
+            lecture: 'Giai thich',
+            guided: 'Co huong dan',
+            guided_practice: 'Luyen co huong dan',
+            practice: 'Luyen tap',
+            independent_practice: 'Lam doc lap',
+            retrieval: 'Goi nho',
+            assess: 'Danh gia',
+            assessment: 'Danh gia',
+            review: 'On tap',
+            remediate: 'Cuong co',
+            summarize_progress: 'Tong ket',
+            transfer: 'Van dung'
+        } : {
+            teach: 'Teach',
+            teacher: 'Teach',
+            explain: 'Explain',
+            lecture: 'Explain',
+            guided: 'Guided',
+            guided_practice: 'Guided practice',
+            practice: 'Practice',
+            independent_practice: 'Independent practice',
+            retrieval: 'Retrieval',
+            assess: 'Assessment',
+            assessment: 'Assessment',
+            review: 'Review',
+            remediate: 'Remediate',
+            summarize_progress: 'Summary',
+            transfer: 'Transfer'
+        }
+
+        return lookup[normalized]
+            || normalized
+                .replace(/[_-]+/g, ' ')
+                .replace(/\b\w/g, (char) => char.toUpperCase())
+    }
+    const getLearningChecklistTone = (status?: string | null) => {
+        const normalized = (status || '').trim().toLowerCase()
+        if (['done', 'complete', 'completed', 'passed', 'mastered', 'verified'].includes(normalized)) {
+            return 'success'
+        }
+        if (['review_due', 'retry', 'needs_retry', 'blocked', 'partial'].includes(normalized)) {
+            return 'warning'
+        }
+        if (['failed', 'incorrect', 'downgraded'].includes(normalized)) {
+            return 'danger'
+        }
+        return 'neutral'
+    }
+    const getLearningChecklistStatusLabel = (status?: string | null) => {
+        const normalized = (status || '').trim().toLowerCase()
+        if (!normalized) return isVietnamese ? 'Dang theo doi' : 'Tracking'
+
+        const lookup: Record<string, string> = isVietnamese ? {
+            not_started: 'Chua bat dau',
+            pending: 'Cho lam',
+            diagnosing: 'Dang chan doan',
+            active: 'Dang hoc',
+            partial: 'Chua vung',
+            in_progress: 'Dang lam',
+            done: 'Hoan tat',
+            complete: 'Hoan tat',
+            completed: 'Hoan tat',
+            passed: 'Dat',
+            mastered: 'Vung',
+            verified: 'Da xac nhan',
+            review_due: 'Can on',
+            retry: 'Lam lai',
+            needs_retry: 'Lam lai',
+            blocked: 'Tac'
+        } : {
+            not_started: 'Not started',
+            pending: 'Pending',
+            diagnosing: 'Diagnosing',
+            active: 'Active',
+            partial: 'Partial',
+            in_progress: 'In progress',
+            done: 'Done',
+            complete: 'Done',
+            completed: 'Done',
+            passed: 'Passed',
+            mastered: 'Mastered',
+            verified: 'Verified',
+            review_due: 'Review due',
+            retry: 'Retry',
+            needs_retry: 'Retry',
+            blocked: 'Blocked'
+        }
+
+        return lookup[normalized]
+            || normalized
+                .replace(/[_-]+/g, ' ')
+                .replace(/\b\w/g, (char) => char.toUpperCase())
+    }
+    const buildLearningDetailState = useCallback((learning?: LearningChatMetadata) => {
+        if (!learning) return null
+
+        const checklist = (
+            learning.turn_output?.progress_checklist
+            || learning.progress_checklist
+            || learning.assessment?.progress_checklist
+            || learning.learning_state?.progress_checklist
+            || []
+        ).filter(item => item && item.label).slice(0, 4)
+
+        const evidence = (
+            learning.turn_output?.evidence_collected
+            || learning.assessment?.evidence_collected
+            || []
+        ).slice(0, 3)
+        const sourceRefs = (
+            learning.turn_output?.selected_source_refs
+            || []
+        ).slice(0, 3)
+
+        const memorySummary =
+            learning.turn_output?.memory_update_summary
+            || learning.memory_update_summary
+            || learning.assessment?.memory_update_summary
+            || learning.learning_state?.last_memory_update_summary
+            || null
+
+        const goal =
+            learning.learning_state?.current_goal?.operational_goal
+            || learning.learning_state?.current_goal?.raw_goal
+            || learning.coach_brief
+            || null
+
+        const mode =
+            learning.turn_output?.instructional_mode
+            || learning.assessment?.instructional_mode
+            || null
+
+        const nextStep =
+            learning.turn_output?.next_step
+            || learning.assessment?.next_step
+            || learning.next_action
+            || null
+
+        const focusTitle =
+            learning.turn_output?.focus_node_title
+            || learning.focus_node?.title
+            || learning.program_title
+            || null
+
+        const hasMemory = Boolean(
+            memorySummary
+            && (memorySummary.added.length || memorySummary.revised.length || memorySummary.downgraded.length || memorySummary.confidence)
+        )
+
+        if (!goal && !mode && !nextStep && !focusTitle && checklist.length === 0 && evidence.length === 0 && sourceRefs.length === 0 && !hasMemory) {
+            return null
+        }
+
+        return {
+            goal,
+            mode,
+            nextStep,
+            focusTitle,
+            checklist,
+            evidence,
+            sourceRefs,
+            memorySummary: hasMemory ? memorySummary : null
+        }
+    }, [])
     const getClaimVerdictLabelLocal = (verdict: WebSearchClaimVerification['verdict']) => {
         switch (verdict) {
             case 'supported':
@@ -2944,6 +3330,78 @@ const ChatPanel = ({
     ])
 
     useEffect(() => {
+        if (!learningProgramId) return
+
+        if (selectedMode.id !== 'learn') {
+            const learnMode = conversationModesLocal.find(mode => mode.id === 'learn') || conversationModesLocal[0]
+            setSelectedMode(learnMode)
+        }
+
+        if (selectedImageTool.id !== 'chat') {
+            const chatTool = imageToolModesLocal.find(mode => mode.id === 'chat') || imageToolModesLocal[0]
+            setSelectedImageTool(chatTool)
+        }
+    }, [
+        conversationModesLocal,
+        imageToolModesLocal,
+        learningProgramId,
+        selectedImageTool.id,
+        selectedMode.id
+    ])
+
+    useEffect(() => {
+        const activeWorkspaceId = conversationWorkspaceId || workspaceId || null
+        const hasEmbeddedLearning = messages.some((message) => (
+            Boolean(message.learning?.program_id)
+            || Boolean(message.learning?.learning_state)
+        ))
+        const shouldLoadLearning =
+            selectedMode.id === 'learn'
+            || Boolean(learningProgramId)
+            || hasEmbeddedLearning
+
+        if (!shouldLoadLearning) {
+            setLearningLiveState(null)
+            setIsLearningLiveLoading(false)
+            return
+        }
+
+        let cancelled = false
+        setIsLearningLiveLoading(true)
+
+        void getLearningLiveState({
+            conversationId: currentConversationId || undefined,
+            workspaceId: activeWorkspaceId,
+            programId: learningProgramId || undefined
+        })
+            .then((data) => {
+                if (cancelled) return
+                setLearningLiveState(data.enabled ? data : null)
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setLearningLiveState(null)
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setIsLearningLiveLoading(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [
+        selectedMode.id,
+        learningProgramId,
+        currentConversationId,
+        conversationWorkspaceId,
+        workspaceId,
+        messages.length
+    ])
+
+    useEffect(() => {
         setAiFileModeEnabled(settings.defaultAiFileMode)
     }, [settings.defaultAiFileMode])
 
@@ -2960,7 +3418,7 @@ const ChatPanel = ({
     // ===== Load file tree for @mention =====
     useEffect(() => {
         if (!localRootPath || !window.electronAPI?.listDirectory) {
-            setMentionItems([])
+            setFileMentionItems([])
             return
         }
 
@@ -2989,7 +3447,7 @@ const ChatPanel = ({
 
         loadRecursive(localRootPath, 0).then(() => {
             if (!cancelled) {
-                setMentionItems(flattenFileTree(tree, localRootPath!))
+                setFileMentionItems(flattenFileTree(tree, localRootPath!))
             }
         })
 
@@ -3016,7 +3474,7 @@ const ChatPanel = ({
             }
             reload(localRootPath!, 0).then(() => {
                 if (!cancelled) {
-                    setMentionItems(flattenFileTree(freshTree, localRootPath!))
+                    setFileMentionItems(flattenFileTree(freshTree, localRootPath!))
                 }
             })
         }
@@ -3027,6 +3485,65 @@ const ChatPanel = ({
             window.removeEventListener('pigtex:local-fs-refresh', handleFsRefresh)
         }
     }, [localRootPath])
+
+    useEffect(() => {
+        let cancelled = false
+        const preferredWorkspaceId = conversationWorkspaceId || workspaceId || null
+
+        const buildConversationMentions = async () => {
+            try {
+                const conversations = await getLocalConversations(undefined, 120)
+                if (cancelled) return
+
+                const sorted = conversations
+                    .filter((conversation) => conversation.id !== currentConversationId)
+                    .sort((left, right) => {
+                        const leftPreferred = (left.workspace_id || null) === preferredWorkspaceId ? 1 : 0
+                        const rightPreferred = (right.workspace_id || null) === preferredWorkspaceId ? 1 : 0
+                        if (leftPreferred !== rightPreferred) return rightPreferred - leftPreferred
+                        return (right.total_messages || 0) - (left.total_messages || 0)
+                    })
+
+                setConversationMentionItems(
+                    sorted.map((conversation) => {
+                        const title = (conversation.title || '').trim()
+                            || (isVietnamese ? 'Đoạn chat chưa đặt tên' : 'Untitled conversation')
+                        const summary = (conversation.summary || '').trim()
+                        const subtitle = summary
+                            || (
+                                isVietnamese
+                                    ? `${conversation.total_messages || 0} tin nhắn`
+                                    : `${conversation.total_messages || 0} messages`
+                            )
+                        return {
+                            type: 'conversation',
+                            name: title,
+                            relativePath: subtitle,
+                            absolutePath: '',
+                            referenceId: conversation.id,
+                            subtitle
+                        } as MentionItem
+                    })
+                )
+            } catch {
+                if (!cancelled) {
+                    setConversationMentionItems([])
+                }
+            }
+        }
+
+        void buildConversationMentions()
+
+        const handleConversationRefresh = () => {
+            void buildConversationMentions()
+        }
+
+        window.addEventListener('pigtex:conversation-updated', handleConversationRefresh)
+        return () => {
+            cancelled = true
+            window.removeEventListener('pigtex:conversation-updated', handleConversationRefresh)
+        }
+    }, [currentConversationId, conversationWorkspaceId, workspaceId, isVietnamese])
 
     // Load messages when conversationId changes
     useEffect(() => {
@@ -3071,6 +3588,12 @@ const ChatPanel = ({
                     }
 
                     // Parse generated media and image references from stored messages
+                    const parsedReferences = parseStoredReferenceMetadata(content)
+                    let mentions = parsedReferences.mentions.length > 0
+                        ? parsedReferences.mentions
+                        : undefined
+                    content = parsedReferences.text
+
                     let videoTask: GeneratedVideoTask | undefined
                     const parsedVideoTask = parseVideoTaskRefFromContent(content)
                     if (parsedVideoTask.videoTask) {
@@ -3115,6 +3638,7 @@ const ChatPanel = ({
                         images,
                         media,
                         videoTask,
+                        mentions,
                         isStreaming: shouldResumePendingVideoTask,
                         requestKind: role === 'user' && images?.length ? 'image_attachment' : undefined,
                         usage: role === 'assistant'
@@ -3333,8 +3857,10 @@ const ChatPanel = ({
 
     const handleMentionSelect = useCallback((item: MentionItem) => {
         setCurrentMentions(prev => {
+            const nextKey = item.referenceId || item.relativePath
             const exists = prev.some(existing =>
-                existing.type === item.type && existing.relativePath === item.relativePath
+                existing.type === item.type
+                && (existing.referenceId || existing.relativePath) === nextKey
             )
             return exists ? prev : [...prev, item]
         })
@@ -3364,6 +3890,142 @@ const ChatPanel = ({
             textarea.selectionEnd = safeCursorPos
         }, 0)
     }, [inputValue, mention])
+
+    const buildConversationMentionContext = useCallback(async (mentions: MentionItem[]) => {
+        const referencedConversations = mentions
+            .filter(isConversationMention)
+            .filter((mention, index, allMentions) =>
+                mention.referenceId !== currentConversationId
+                && allMentions.findIndex((candidate) => candidate.referenceId === mention.referenceId) === index
+            )
+
+        if (referencedConversations.length === 0) {
+            return ''
+        }
+
+        const limitedMentions = referencedConversations.slice(0, MAX_CONVERSATION_MENTION_ITEMS)
+        const fetchedConversations = await Promise.all(
+            limitedMentions.map(async (mention) => {
+                try {
+                    const conversation = await getLocalConversation(mention.referenceId)
+                    return { mention, conversation, error: null as string | null }
+                } catch (error) {
+                    return {
+                        mention,
+                        conversation: null,
+                        error: error instanceof Error ? error.message : String(error)
+                    }
+                }
+            })
+        )
+
+        const contextParts: string[] = [
+            '## Referenced Conversations',
+            isVietnamese
+                ? 'Nguoi dung da chu dong keo cac conversation sau vao lam ngữ cảnh tham chiếu cho lượt chat này.'
+                : 'The user explicitly pulled the following conversations in as reference context for this turn.',
+            isVietnamese
+                ? 'Chi dung de lay thong tin cu the khi lien quan. Khong duoc tu dong tron muc tieu, task, memory, hay learner state cua conversation kia vao thread hien tai neu user chua yeu cau.'
+                : 'Use them only for concrete reference when relevant. Do not automatically merge goals, tasks, memory, or learner state from those conversations into the current thread unless the user asks.',
+            ''
+        ]
+
+        let totalChars = 0
+        let reachedBudget = false
+
+        for (const item of fetchedConversations) {
+            const lines: string[] = []
+            const mentionLabel = item.mention.name || item.mention.relativePath
+            if (!item.conversation) {
+                lines.push(`### @conversation:${mentionLabel}`)
+                lines.push(
+                    isVietnamese
+                        ? `Khong the nap conversation nay luc gui: ${item.error || 'Unknown error'}`
+                        : `Could not load this conversation at send time: ${item.error || 'Unknown error'}`
+                )
+                lines.push('')
+                contextParts.push(...lines)
+                continue
+            }
+
+            const conversationTitle = (item.conversation.title || '').trim() || mentionLabel
+            const conversationSummary = (item.conversation.summary || '').trim()
+            const visibleMessages = item.conversation.messages
+                .filter((message) => message.role !== 'system')
+                .slice(-MAX_CONVERSATION_MENTION_MESSAGES)
+
+            lines.push(`### @conversation:${conversationTitle}`)
+            if (conversationSummary) {
+                const remainingBudget = MAX_CONVERSATION_MENTION_TOTAL_CHARS - totalChars
+                if (remainingBudget <= 0) {
+                    reachedBudget = true
+                    break
+                }
+                const summaryText = truncatePromptSnippet(conversationSummary, Math.min(700, remainingBudget))
+                totalChars += summaryText.length
+                lines.push(`${isVietnamese ? 'Tom tat' : 'Summary'}: ${summaryText}`)
+            }
+            lines.push(isVietnamese ? 'Cac luot trao doi tham chieu:' : 'Referenced turns:')
+
+            let includedMessages = 0
+            for (const message of visibleMessages) {
+                const remainingBudget = MAX_CONVERSATION_MENTION_TOTAL_CHARS - totalChars
+                if (remainingBudget <= 0) {
+                    reachedBudget = true
+                    break
+                }
+
+                const content = truncatePromptSnippet(
+                    stripAiToolArtifacts(message.content || ''),
+                    Math.min(MAX_CONVERSATION_MENTION_MESSAGE_CHARS, remainingBudget)
+                )
+                if (!content) continue
+
+                const roleLabel = message.role === 'assistant'
+                    ? (isVietnamese ? 'Assistant' : 'Assistant')
+                    : (isVietnamese ? 'User' : 'User')
+                lines.push(`${roleLabel}: ${content}`)
+                totalChars += content.length
+                includedMessages += 1
+            }
+
+            if (item.conversation.messages.filter((message) => message.role !== 'system').length > includedMessages) {
+                const omittedCount = Math.max(0, item.conversation.messages.filter((message) => message.role !== 'system').length - includedMessages)
+                if (omittedCount > 0) {
+                    lines.push(
+                        isVietnamese
+                            ? `... (${omittedCount} tin nhan khac duoc bo qua de giu context gon hon)`
+                            : `... (${omittedCount} more messages omitted to keep the context compact)`
+                    )
+                }
+            }
+
+            lines.push('')
+            contextParts.push(...lines)
+
+            if (reachedBudget) {
+                break
+            }
+        }
+
+        if (referencedConversations.length > limitedMentions.length) {
+            contextParts.push(
+                isVietnamese
+                    ? `... (${referencedConversations.length - limitedMentions.length} conversation mention khac duoc bo qua de giu do tre on dinh)`
+                    : `... (${referencedConversations.length - limitedMentions.length} additional conversation mentions skipped to keep latency stable)`,
+                ''
+            )
+        } else if (reachedBudget) {
+            contextParts.push(
+                isVietnamese
+                    ? '... (Da cat bot noi dung conversation tham chieu de giu context trong gioi han)'
+                    : '... (Referenced conversation content was truncated to stay within the context budget)',
+                ''
+            )
+        }
+
+        return contextParts.join('\n')
+    }, [currentConversationId, isVietnamese])
 
     // ===== Image handling =====
     const processImageFiles = useCallback(async (files: File[]) => {
@@ -4091,6 +4753,8 @@ const ChatPanel = ({
         const isImageEditMode = isImageToolRequest && imageAttachments.length > 0
         const isImageGenerateMode = isImageToolRequest && !isImageEditMode
         const selectedModeId = selectedMode.id as ConversationModeId
+        const requestModeId: NonNullable<SmartChatRequest['mode']> = selectedModeId === 'fast' ? 'fast' : 'deep'
+        const selectedLearningMode: NonNullable<SmartChatRequest['learning_mode']> = selectedModeId === 'learn' ? 'teacher' : 'off'
         const activeToolModelId = isVoiceToolRequest
             ? voiceStudio.model.trim()
             : isVideoToolRequest
@@ -4205,12 +4869,21 @@ const ChatPanel = ({
         }
 
         const mentions = [...currentMentions]
+        const filesystemMentions = mentions.filter(isFilesystemMention)
+        const conversationMentions = mentions.filter(isConversationMention)
         const images = [...imageAttachments]
         const files = [...fileAttachments]
         const fallbackAttachmentText = files.length > 0
             ? `${isVietnamese ? 'Tệp đính kèm' : 'Attached files'}: ${files.map(file => file.filename).join(', ')}`
             : ''
-        const displayText = buildMentionAwareMessageText(promptText, mentions, fallbackAttachmentText)
+        const visibleUserText = promptText
+        const storedUserText = buildStoredMessageContent(
+            promptText || fallbackAttachmentText,
+            undefined,
+            undefined,
+            undefined,
+            mentions
+        )
         const requestKind: UIMessage['requestKind'] = isImageGenerateMode
             ? 'image_generate'
             : isImageEditMode
@@ -4226,20 +4899,21 @@ const ChatPanel = ({
         const userMessage: UIMessage = {
             id: `m${Date.now()}`,
             role: 'user',
-            content: displayText,
+            content: visibleUserText,
             timestamp: copy.justNow,
             model: activeToolModelId || undefined,
             images: images.length > 0 ? images : undefined,
             files: files.length > 0 ? files : undefined,
+            mentions: mentions.length > 0 ? mentions : undefined,
             requestKind
         }
 
         sendInFlightRef.current = true
         setMessages(prev => [...prev, userMessage])
-        const messageText = displayText
+        const messageText = storedUserText
         const useWorkspaceReviewControllerForTurn = shouldUseWorkspaceReviewController({
             promptText,
-            mentions,
+            mentions: filesystemMentions,
             localRootPath: localRootPath ?? null,
             aiFileModeEnabled
         })
@@ -4443,13 +5117,13 @@ const ChatPanel = ({
 
             // ===== Build @mention context =====
             let mentionContext = ''
-            if (!useWorkspaceReviewControllerForTurn && mentions.length > 0 && localRootPath && window.electronAPI?.readFile) {
+            if (!useWorkspaceReviewControllerForTurn && filesystemMentions.length > 0 && localRootPath && window.electronAPI?.readFile) {
                 const contextParts: string[] = [
                     '## Referenced Files/Folders (user explicitly mentioned these with @)',
                     'The user has explicitly referenced the following items. Focus your response on these when relevant.',
                     ''
                 ]
-                const limitedMentions = mentions.slice(0, MAX_MENTION_CONTEXT_ITEMS)
+                const limitedMentions = filesystemMentions.slice(0, MAX_MENTION_CONTEXT_ITEMS)
                 const sep = localRootPath.includes('/') ? '/' : '\\\\'
 
                 const mentionBlocks = await Promise.all(
@@ -4499,9 +5173,9 @@ const ChatPanel = ({
                     contextParts.push(...lines)
                 }
 
-                if (mentions.length > limitedMentions.length) {
+                if (filesystemMentions.length > limitedMentions.length) {
                     contextParts.push(
-                        `... (${mentions.length - limitedMentions.length} additional @mentions skipped to keep response latency stable)`,
+                        `... (${filesystemMentions.length - limitedMentions.length} additional @mentions skipped to keep response latency stable)`,
                         ''
                     )
                 }
@@ -4509,11 +5183,16 @@ const ChatPanel = ({
                 mentionContext = contextParts.join('\n')
             }
 
+            const conversationContext = conversationMentions.length > 0
+                ? await buildConversationMentionContext(conversationMentions)
+                : ''
+
             const runtimeInstructionParts = [
                 modeRuntimeInstruction,
                 customInstruction,
                 aiFileInstruction,
-                mentionContext
+                mentionContext,
+                conversationContext
             ].filter(Boolean)
             const runtimeInstruction = runtimeInstructionParts.length > 0
                 ? runtimeInstructionParts.join('\n\n')
@@ -4617,7 +5296,7 @@ const ChatPanel = ({
 
             if (useWorkspaceReviewControllerForTurn && localRootPath) {
                 appendAgentStatus(copy.agentReviewingWorkspace)
-                const reviewContext = await collectWorkspaceReviewContext(localRootPath, mentions)
+                const reviewContext = await collectWorkspaceReviewContext(localRootPath, filesystemMentions)
                 appendAgentStatus(copy.agentReviewedWorkspace(
                     reviewContext.visitedDirectories,
                     reviewContext.discoveredEntries,
@@ -4641,6 +5320,12 @@ const ChatPanel = ({
                     model: selectedModel.id,
                     conversation_id: activeConversationId || undefined,
                     workspace_id: requestWorkspaceId || undefined,
+                    learning_program_id: (isInternalToolTurn || useWorkspaceReviewControllerForTurn || isImageToolRequest || isMediaGenerationRequest)
+                        ? undefined
+                        : (selectedModeId === 'learn' ? learningProgramId || undefined : undefined),
+                    learning_mode: (isInternalToolTurn || useWorkspaceReviewControllerForTurn || isImageToolRequest || isMediaGenerationRequest)
+                        ? 'off'
+                        : selectedLearningMode,
                     runtime_instruction: runtimeInstruction,
                     stream: true,
                     temperature: settings.temperature,
@@ -4653,7 +5338,7 @@ const ChatPanel = ({
                     use_knowledge: useKnowledge,
                     use_facts: useFacts,
                     use_history: useHistory,
-                    mode: selectedModeId,
+                    mode: requestModeId,
                     use_web_search: isInternalToolTurn ? false : (shouldUseWebSearch ? true : undefined),
                     web_search_mode: (isImageToolRequest || isInternalToolTurn || useWorkspaceReviewControllerForTurn) ? undefined : 'auto',
                     web_search_deep_read: useWorkspaceReviewControllerForTurn
@@ -4760,7 +5445,7 @@ const ChatPanel = ({
                         assistantRawContent += chunk.content
                         const chunkUsage = normalizeStreamUsage(chunk.usage, selectedModel.id)
 
-                        if (chunk.citations || chunk.webSearch || chunk.memory || chunkUsage) {
+                        if (chunk.citations || chunk.webSearch || chunk.memory || chunk.learning || chunkUsage) {
                             setMessages(prev => prev.map(m =>
                                 m.id === assistantId
                                     ? {
@@ -4768,6 +5453,7 @@ const ChatPanel = ({
                                         memory: chunk.memory ?? m.memory,
                                         citations: chunk.citations ?? m.citations,
                                         webSearch: chunk.webSearch ?? m.webSearch,
+                                        learning: chunk.learning ?? m.learning,
                                         usage: chunkUsage ?? m.usage
                                     }
                                     : m
@@ -5394,6 +6080,59 @@ const ChatPanel = ({
     const showComposerAttachmentControls = isChatMode || isImageToolMode
     const hasPendingAssistantMessage = messages.some(hasPendingAssistantWork)
     const isInputLocked = isTyping || sendInFlightRef.current || hasPendingAssistantMessage
+    const activeLearningProgramTitle = (learningProgramTitle || '').trim()
+    const latestLearningMetadata = useMemo(() => {
+        const lastLearningMessage = [...messages].reverse().find((message) => (
+            Boolean(message.learning?.learning_state)
+            || Boolean(message.learning?.focus_node)
+            || Boolean(message.learning?.turn_output)
+        ))
+        return lastLearningMessage?.learning || null
+    }, [messages])
+    const learningCockpitState = learningLiveState?.learning_state || latestLearningMetadata?.learning_state || null
+    const learningCockpitFocus = learningLiveState?.focus_node || latestLearningMetadata?.focus_node || null
+    const learningCockpitAdaptive = learningCockpitState?.adaptive_plan || null
+    const learningCockpitReview = learningCockpitState?.review_summary || null
+    const learningCockpitSnapshot = learningCockpitState?.focus_snapshot || null
+    const learningCockpitSources: LearningState['source_registry']['sources'] = (learningCockpitState?.source_registry?.sources || []).slice(0, 3)
+    const learningCockpitFocusSkill = (learningCockpitState?.knowledge_map?.skills || []).find(
+        (skill: LearningState['knowledge_map']['skills'][number]) => skill.node_id === learningCockpitFocus?.id
+    ) || null
+    const learningCockpitProgramTitle =
+        learningLiveState?.program?.title
+        || activeLearningProgramTitle
+        || learningLiveState?.program?.topic
+        || latestLearningMetadata?.program_title
+        || null
+    const learningCockpitFocusTitle =
+        learningCockpitSnapshot?.title
+        || learningCockpitFocus?.title
+        || learningCockpitProgramTitle
+        || null
+    const learningCockpitGoal =
+        learningCockpitState?.current_goal?.operational_goal
+        || learningCockpitState?.current_goal?.raw_goal
+        || null
+    const learningCockpitNextAction =
+        learningCockpitSnapshot?.next_verification_action
+        || learningCockpitState?.last_turn_output?.next_step
+        || learningLiveState?.next_action
+        || null
+    const learningCockpitMisconceptions: string[] = (
+        learningCockpitSnapshot?.misconceptions
+        || learningCockpitFocusSkill?.misconceptions
+        || []
+    ).slice(0, 3)
+    const learningCockpitSuccessSignals: string[] = (learningCockpitSnapshot?.success_criteria || []).slice(0, 3)
+    const showLearningCockpit = selectedMode.id === 'learn' && (
+        Boolean(learningCockpitProgramTitle)
+        || Boolean(learningCockpitGoal)
+        || Boolean(learningCockpitFocusTitle)
+        || learningCockpitSources.length > 0
+        || Boolean(learningCockpitAdaptive)
+        || Boolean(learningCockpitReview)
+        || isLearningLiveLoading
+    )
     const canSend = !isInputLocked && (
         isImageToolMode
             ? Boolean(inputValue.trim())
@@ -5412,6 +6151,16 @@ const ChatPanel = ({
             ? copy.describeVoiceGenerate
             : isVideoToolMode
                 ? copy.describeVideoGenerate
+                : selectedMode.id === 'learn'
+                    ? (
+                        activeLearningProgramTitle
+                            ? (isVietnamese
+                                ? `Tiep tuc "${activeLearningProgramTitle}" hoac gui them bai/tai lieu cho PigTex Learn...`
+                                : `Continue "${activeLearningProgramTitle}" or attach material for PigTex Learn...`)
+                            : (isVietnamese
+                                ? 'Noi muc tieu hoc hoac gui bai/tai lieu de PigTex day theo mode Learn...'
+                                : 'Describe your learning goal or attach material for PigTex Learn...')
+                    )
                 : (imageAttachments.length > 0 || fileAttachments.length > 0
             ? copy.attachmentPrompt
             : (localRootPath ? copy.askAnythingMentions : copy.askAnything))
@@ -5740,6 +6489,30 @@ const ChatPanel = ({
                                                     ))}
                                                 </div>
                                             )}
+                                            {message.mentions && message.mentions.length > 0 && (
+                                                <div className="message-reference-chips">
+                                                    {message.mentions.map((mention) => (
+                                                        <span
+                                                            key={`${mention.type}:${mention.referenceId || mention.relativePath}`}
+                                                            className={`message-reference-chip message-reference-chip-${mention.type}`}
+                                                            title={mention.type === 'conversation'
+                                                                ? mention.subtitle || mention.name
+                                                                : mention.relativePath}
+                                                        >
+                                                            <span className="message-reference-chip-prefix">
+                                                                {mention.type === 'conversation'
+                                                                    ? '@conversation'
+                                                                    : mention.type === 'folder'
+                                                                        ? '@folder'
+                                                                        : '@file'}
+                                                            </span>
+                                                            <span className="message-reference-chip-value">
+                                                                {mention.type === 'conversation' ? mention.name : mention.relativePath}
+                                                            </span>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                             {message.content && <span>{message.content}</span>}
                                         </div>
                                     ) : (
@@ -5898,6 +6671,166 @@ const ChatPanel = ({
                                                     </div>
                                                 </details>
                                             )}
+                                            {(() => {
+                                                const learningDetails = buildLearningDetailState(message.learning)
+                                                if (!learningDetails) return null
+
+                                                return (
+                                                    <details className="message-learning-details">
+                                                        <summary className="message-learning-summary">
+                                                            <span>{copy.learningDetails}</span>
+                                                            {learningDetails.focusTitle && (
+                                                                <span className="message-learning-summary-tag">
+                                                                    {learningDetails.focusTitle}
+                                                                </span>
+                                                            )}
+                                                            <ChevronDown size={14} className="message-learning-summary-icon" />
+                                                        </summary>
+                                                        <div className="message-learning-details-content">
+                                                            {(learningDetails.goal || learningDetails.mode || learningDetails.nextStep) && (
+                                                                <div className="message-learning-grid">
+                                                                    {learningDetails.goal && (
+                                                                        <div className="message-learning-field">
+                                                                            <span className="message-learning-label">{copy.learningGoal}</span>
+                                                                            <span className="message-learning-value">{learningDetails.goal}</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {learningDetails.mode && (
+                                                                        <div className="message-learning-field">
+                                                                            <span className="message-learning-label">{copy.learningMode}</span>
+                                                                            <span className="message-learning-value">
+                                                                                {getLearningModeLabelLocal(learningDetails.mode)}
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                    {learningDetails.nextStep && (
+                                                                        <div className="message-learning-field">
+                                                                            <span className="message-learning-label">{copy.learningNextStep}</span>
+                                                                            <span className="message-learning-value">{learningDetails.nextStep}</span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            {learningDetails.checklist.length > 0 && (
+                                                                <div className="message-learning-section">
+                                                                    <span className="message-learning-section-title">{copy.learningChecklist}</span>
+                                                                    <div className="message-learning-list">
+                                                                        {learningDetails.checklist.map((item) => (
+                                                                            <div
+                                                                                key={`${message.id}-learning-check-${item.item_id}`}
+                                                                                className="message-learning-check-item"
+                                                                            >
+                                                                                <span className={`message-learning-status message-learning-status-${getLearningChecklistTone(item.status)}`}>
+                                                                                    {getLearningChecklistStatusLabel(item.status)}
+                                                                                </span>
+                                                                                <div className="message-learning-body">
+                                                                                    <span className="message-learning-item-title">{item.label}</span>
+                                                                                    {item.reason && (
+                                                                                        <span className="message-learning-item-meta">{item.reason}</span>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {learningDetails.evidence.length > 0 && (
+                                                                <div className="message-learning-section">
+                                                                    <span className="message-learning-section-title">{copy.learningEvidence}</span>
+                                                                    <div className="message-learning-list">
+                                                                        {learningDetails.evidence.map((item, evidenceIndex) => (
+                                                                            <div
+                                                                                key={`${message.id}-learning-evidence-${evidenceIndex}`}
+                                                                                className="message-learning-evidence-item"
+                                                                            >
+                                                                                {typeof item === 'string' ? (
+                                                                                    <span className="message-learning-value">{item}</span>
+                                                                                ) : (
+                                                                                    <div className="message-learning-body">
+                                                                                        <div className="message-learning-evidence-header">
+                                                                                            <span className="message-learning-item-title">{item.summary}</span>
+                                                                                            <span className="message-learning-evidence-strength">
+                                                                                                {(item.strength || '').trim() || (isVietnamese ? 'Bang chung' : 'Evidence')}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        {(item.type || item.timestamp) && (
+                                                                                            <span className="message-learning-item-meta">
+                                                                                                {item.type || (isVietnamese ? 'Cap nhat' : 'Updated')}
+                                                                                                {item.timestamp ? ` • ${formatUiDateTime(item.timestamp)}` : ''}
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {learningDetails.sourceRefs.length > 0 && (
+                                                                <div className="message-learning-section">
+                                                                    <span className="message-learning-section-title">{copy.learningSources}</span>
+                                                                    <div className="message-learning-list">
+                                                                        {learningDetails.sourceRefs.map((item: string, sourceIndex: number) => (
+                                                                            <div
+                                                                                key={`${message.id}-learning-source-${sourceIndex}`}
+                                                                                className="message-learning-evidence-item"
+                                                                            >
+                                                                                <span className="message-learning-value">{item}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {learningDetails.memorySummary && (
+                                                                <div className="message-learning-section">
+                                                                    <span className="message-learning-section-title">{copy.learningMemory}</span>
+                                                                    <div className="message-learning-memory">
+                                                                        {learningDetails.memorySummary.added.length > 0 && (
+                                                                            <div className="message-learning-memory-block">
+                                                                                <span className="message-learning-memory-label">
+                                                                                    {isVietnamese ? 'Them vao nho' : 'Added'}
+                                                                                </span>
+                                                                                <span className="message-learning-memory-value">
+                                                                                    {learningDetails.memorySummary.added.join(' • ')}
+                                                                                </span>
+                                                                            </div>
+                                                                        )}
+                                                                        {learningDetails.memorySummary.revised.length > 0 && (
+                                                                            <div className="message-learning-memory-block">
+                                                                                <span className="message-learning-memory-label">
+                                                                                    {isVietnamese ? 'Dieu chinh' : 'Revised'}
+                                                                                </span>
+                                                                                <span className="message-learning-memory-value">
+                                                                                    {learningDetails.memorySummary.revised.join(' • ')}
+                                                                                </span>
+                                                                            </div>
+                                                                        )}
+                                                                        {learningDetails.memorySummary.downgraded.length > 0 && (
+                                                                            <div className="message-learning-memory-block">
+                                                                                <span className="message-learning-memory-label">
+                                                                                    {isVietnamese ? 'Can xem lai' : 'Downgraded'}
+                                                                                </span>
+                                                                                <span className="message-learning-memory-value">
+                                                                                    {learningDetails.memorySummary.downgraded.join(' • ')}
+                                                                                </span>
+                                                                            </div>
+                                                                        )}
+                                                                        {learningDetails.memorySummary.confidence > 0 && (
+                                                                            <span className="message-learning-memory-confidence">
+                                                                                {copy.confidence}: {Math.round(learningDetails.memorySummary.confidence * 100)}%
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </details>
+                                                )
+                                            })()}
                                         </>
                                     )}
 
@@ -5985,17 +6918,21 @@ const ChatPanel = ({
                         <div className="chat-mention-chips">
                             {currentMentions.map((m) => (
                                 <span
-                                    key={`${m.type}:${m.relativePath}`}
+                                    key={`${m.type}:${m.referenceId || m.relativePath}`}
                                     className={`chat-mention-chip chat-mention-chip-${m.type}`}
                                 >
-                                    {m.type === 'folder' ? '📁' : '📄'} {m.relativePath}
+                                    {m.type === 'folder' ? '📁' : m.type === 'conversation' ? '💬' : '📄'} {m.type === 'conversation' ? m.name : m.relativePath}
                                     <button
                                         className="chat-mention-chip-remove"
                                         title={copy.removeMention}
                                         onClick={() => {
+                                            const mentionKey = m.referenceId || m.relativePath
                                             setCurrentMentions(prev =>
                                                 prev.filter(existing =>
-                                                    !(existing.type === m.type && existing.relativePath === m.relativePath)
+                                                    !(
+                                                        existing.type === m.type
+                                                        && (existing.referenceId || existing.relativePath) === mentionKey
+                                                    )
                                                 )
                                             )
                                         }}
@@ -6009,7 +6946,7 @@ const ChatPanel = ({
 
                     {/* MentionPopup */}
                     <MentionPopup
-                        isOpen={mention.popup.isOpen && !!localRootPath}
+                        isOpen={mention.popup.isOpen}
                         items={filteredMentionItems}
                         query={mention.popup.query}
                         activeIndex={mention.popup.activeIndex}
@@ -6217,6 +7154,147 @@ const ChatPanel = ({
                         </>
                     )}
 
+                    {selectedMode.id === 'learn' && (
+                        showLearningCockpit ? (
+                            <div className="chat-learning-cockpit">
+                                <div className="chat-learning-cockpit-header">
+                                    <div className="chat-learning-cockpit-title-wrap">
+                                        <span className="chat-learning-cockpit-label">{learningCockpitCopy.cockpitTitle}</span>
+                                        {learningCockpitProgramTitle && (
+                                            <span className="chat-learning-cockpit-program">{learningCockpitProgramTitle}</span>
+                                        )}
+                                    </div>
+                                    {learningCockpitFocusTitle && (
+                                        <span className="chat-learning-cockpit-focus">{learningCockpitFocusTitle}</span>
+                                    )}
+                                </div>
+
+                                {isLearningLiveLoading && (
+                                    <div className="chat-learning-cockpit-note">{learningCockpitCopy.loading}</div>
+                                )}
+
+                                <div className="chat-learning-cockpit-stats">
+                                    <div className="chat-learning-cockpit-stat">
+                                        <span>{learningCockpitCopy.deadline}</span>
+                                        <strong>
+                                            {getLearningDeadlineStatusLabelLocal(learningCockpitAdaptive?.deadline_status)}
+                                            {typeof learningCockpitAdaptive?.days_left === 'number' ? ` • ${learningCockpitAdaptive.days_left}d` : ''}
+                                        </strong>
+                                    </div>
+                                    <div className="chat-learning-cockpit-stat">
+                                        <span>{learningCockpitCopy.reviewLoad}</span>
+                                        <strong>{getLearningReviewPressureLabelLocal(learningCockpitReview?.review_pressure || learningCockpitAdaptive?.review_pressure)}</strong>
+                                    </div>
+                                    <div className="chat-learning-cockpit-stat">
+                                        <span>{learningCockpitCopy.remaining}</span>
+                                        <strong>{learningCockpitAdaptive?.remaining_nodes ?? '—'}</strong>
+                                    </div>
+                                    <div className="chat-learning-cockpit-stat">
+                                        <span>{learningCockpitCopy.dueNow}</span>
+                                        <strong>{learningCockpitReview?.due_now ?? learningCockpitAdaptive?.due_now ?? 0}</strong>
+                                    </div>
+                                    <div className="chat-learning-cockpit-stat">
+                                        <span>{learningCockpitCopy.sessionsPerWeek}</span>
+                                        <strong>{learningCockpitAdaptive?.recommended_sessions_per_week ?? '—'}</strong>
+                                    </div>
+                                    <div className="chat-learning-cockpit-stat">
+                                        <span>{learningCockpitCopy.minutesPerSession}</span>
+                                        <strong>{learningCockpitAdaptive?.recommended_minutes_per_session ?? '—'}</strong>
+                                    </div>
+                                </div>
+
+                                {(learningCockpitGoal || learningCockpitNextAction || learningCockpitSnapshot?.summary) && (
+                                    <div className="chat-learning-cockpit-grid">
+                                        {learningCockpitGoal && (
+                                            <div className="chat-learning-cockpit-field">
+                                                <span>{learningCockpitCopy.goal}</span>
+                                                <strong>{learningCockpitGoal}</strong>
+                                            </div>
+                                        )}
+                                        {learningCockpitSnapshot?.summary && (
+                                            <div className="chat-learning-cockpit-field">
+                                                <span>{learningCockpitCopy.focus}</span>
+                                                <strong>{learningCockpitSnapshot.summary}</strong>
+                                            </div>
+                                        )}
+                                        {learningCockpitNextAction && (
+                                            <div className="chat-learning-cockpit-field">
+                                                <span>{learningCockpitCopy.nextAction}</span>
+                                                <strong>{learningCockpitNextAction}</strong>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {(learningCockpitMisconceptions.length > 0 || learningCockpitSuccessSignals.length > 0 || learningCockpitSources.length > 0 || (learningCockpitAdaptive?.stalled_nodes?.length || 0) > 0) && (
+                                    <div className="chat-learning-cockpit-columns">
+                                        {learningCockpitMisconceptions.length > 0 && (
+                                            <div className="chat-learning-cockpit-section">
+                                                <span>{learningCockpitCopy.misconceptions}</span>
+                                                <div className="chat-learning-cockpit-list">
+                                                    {learningCockpitMisconceptions.map((item: string, index: number) => (
+                                                        <div key={`learning-mis-${index}`} className="chat-learning-cockpit-chip">
+                                                            {item}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {learningCockpitSuccessSignals.length > 0 && (
+                                            <div className="chat-learning-cockpit-section">
+                                                <span>{learningCockpitCopy.successSignals}</span>
+                                                <div className="chat-learning-cockpit-list">
+                                                    {learningCockpitSuccessSignals.map((item: string, index: number) => (
+                                                        <div key={`learning-success-${index}`} className="chat-learning-cockpit-chip chat-learning-cockpit-chip-success">
+                                                            {item}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {(learningCockpitAdaptive?.stalled_nodes?.length || 0) > 0 && (
+                                            <div className="chat-learning-cockpit-section">
+                                                <span>{learningCockpitCopy.stalled}</span>
+                                                <div className="chat-learning-cockpit-list">
+                                                    {(learningCockpitAdaptive?.stalled_nodes || []).slice(0, 2).map((item: NonNullable<NonNullable<LearningState['adaptive_plan']>['stalled_nodes']>[number]) => (
+                                                        <div key={item.node_id} className="chat-learning-cockpit-chip chat-learning-cockpit-chip-warning">
+                                                            {item.title} • {item.failures}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {learningCockpitSources.length > 0 && (
+                                            <div className="chat-learning-cockpit-section">
+                                                <span>{learningCockpitCopy.sources}</span>
+                                                <div className="chat-learning-cockpit-sources">
+                                                    {learningCockpitSources.map((source: LearningState['source_registry']['sources'][number]) => (
+                                                        <div key={source.source_id} className="chat-learning-cockpit-source">
+                                                            <strong>{source.file_name}</strong>
+                                                            {source.excerpt && (
+                                                                <span>{source.excerpt}</span>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="chat-learning-focus">
+                                <span className="chat-learning-focus-label">
+                                    {isVietnamese ? 'PigTex Learn' : 'PigTex Learn'}
+                                </span>
+                                <span className="chat-learning-cockpit-note">{learningCockpitCopy.noData}</span>
+                            </div>
+                        )
+                    )}
+
                     {/* Textarea */}
                     <textarea
                         ref={textareaRef}
@@ -6227,12 +7305,10 @@ const ChatPanel = ({
                         onChange={(e) => {
                             setInputValue(e.target.value)
                             // Trigger mention detection
-                            if (localRootPath) {
-                                mention.handleInputChange(
-                                    e.target.value,
-                                    e.target.selectionStart || 0
-                                )
-                            }
+                            mention.handleInputChange(
+                                e.target.value,
+                                e.target.selectionStart || 0
+                            )
                         }}
                         onKeyDown={(e) => {
                             // Let mention popup handle keys first
@@ -6362,9 +7438,10 @@ const ChatPanel = ({
                                 <div className="dropdown-container" onClick={(e) => e.stopPropagation()}>
                                     <button
                                         className="selector-btn"
+                                        title={isVietnamese ? 'Chọn chế độ chat hoặc học' : 'Choose chat or learning mode'}
                                         onClick={() => toggleComposerMenu('mode')}
                                     >
-                                        <span>{selectedModeOption.label}</span>
+                                        <span>{selectedModeButtonLabel}</span>
                                         <ChevronDown size={14} />
                                     </button>
                                     <AnimatePresence>
@@ -6663,3 +7740,4 @@ const ChatPanel = ({
 }
 
 export default ChatPanel
+

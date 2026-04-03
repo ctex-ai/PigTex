@@ -35,6 +35,12 @@ import './Dashboard.css'
 
 export type ViewMode = 'chat' | 'editor' | 'admin'
 
+type LearningProgramLaunchContext = {
+    id: string
+    title: string
+    workspaceId: string | null
+}
+
 /** Imperative handle exposed by Sidebar for external triggers */
 export interface SidebarHandle {
     openCreateWorkspace: () => void
@@ -139,6 +145,7 @@ const Dashboard = () => {
     const [viewMode, setViewMode] = useState<ViewMode>('chat')
     const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(() => readStoredWorkspaceSelection(user?.id))
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(() => readStoredConversationSelection(user?.id))
+    const [selectedLearningProgram, setSelectedLearningProgram] = useState<LearningProgramLaunchContext | null>(null)
     const [chatResetToken, setChatResetToken] = useState(0)
     const [selectedEditorTarget, setSelectedEditorTarget] = useState<EditorTarget | null>(null)
     const [showSettingsModal, setShowSettingsModal] = useState(false)
@@ -266,6 +273,7 @@ const Dashboard = () => {
 
     const handleNewChat = useCallback((_workspaceId: string | null) => {
         // Force reset to a fresh thread even if caller forgot to clear selection.
+        setSelectedLearningProgram(null)
         setSelectedConversationId(null)
         if (viewMode !== 'chat') {
             setViewMode('chat')
@@ -274,6 +282,7 @@ const Dashboard = () => {
     }, [viewMode])
 
     const handleConversationSelect = useCallback((conversationId: string | null) => {
+        setSelectedLearningProgram(null)
         setSelectedConversationId(conversationId)
         if (conversationId && viewMode !== 'chat') {
             setViewMode('chat')
@@ -281,10 +290,22 @@ const Dashboard = () => {
     }, [viewMode])
 
     const handleWorkspaceSelect = useCallback((workspaceId: string | null) => {
+        setSelectedLearningProgram(null)
         setSelectedWorkspaceId(workspaceId)
         setSelectedConversationId(null)
         setSelectedEditorTarget(null)
     }, [])
+
+    const handleLearningProgramSelect = useCallback((program: LearningProgramLaunchContext) => {
+        setSelectedLearningProgram(program)
+        setSelectedWorkspaceId(program.workspaceId)
+        setSelectedConversationId(null)
+        setSelectedEditorTarget(null)
+        if (viewMode !== 'chat') {
+            setViewMode('chat')
+        }
+        setChatResetToken(prev => prev + 1)
+    }, [viewMode])
 
     const handleSaveSettings = useCallback((nextSettings: PigTexSettings) => {
         const saved = savePigTexSettings(nextSettings)
@@ -941,6 +962,8 @@ const Dashboard = () => {
                         selectedConversationId={selectedConversationId}
                         onConversationSelect={handleConversationSelect}
                         onNewChat={handleNewChat}
+                        selectedLearningProgramId={selectedLearningProgram?.id ?? null}
+                        onLearningProgramSelect={handleLearningProgramSelect}
                         isAdmin={isAdmin}
                         onOpenAdmin={handleOpenAdmin}
                         onOpenSettings={() => setShowSettingsModal(true)}
@@ -973,6 +996,8 @@ const Dashboard = () => {
                                 variant="centered"
                                 conversationId={selectedConversationId}
                                 workspaceId={selectedWorkspaceId}
+                                learningProgramId={selectedLearningProgram?.id ?? null}
+                                learningProgramTitle={selectedLearningProgram?.title ?? null}
                                 newChatToken={chatResetToken}
                                 onConversationCreated={(id) => setSelectedConversationId(id)}
                                 onConversationInvalidated={() => setSelectedConversationId(null)}

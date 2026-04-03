@@ -82,7 +82,7 @@ export function resolvePigTexApiBaseForEnvironment(
 ): string {
     const trimmed = (envApiBase || '').trim();
     if (!trimmed) {
-        if (isProductionBuild) {
+        if (isProductionBuild && !allowLoopbackOverride) {
             throw new Error('Production desktop build requires VITE_PIGTEX_API_BASE to point to the hosted backend.');
         }
         return DEFAULT_PIGTEX_API_BASE;
@@ -1599,6 +1599,34 @@ function extractMemoryContextMetadataFromPayload(payload: JsonRecord): MemoryCon
         system_facts_used: typeof raw.system_facts_used === 'number' ? raw.system_facts_used : undefined,
         workspace_facts_used: typeof raw.workspace_facts_used === 'number' ? raw.workspace_facts_used : undefined,
         sources: sources.length > 0 ? sources : undefined,
+    };
+}
+
+function extractLearningMetadataFromPayload(payload: JsonRecord): LearningChatMetadata | undefined {
+    const raw = payload.learning;
+    if (!isJsonRecord(raw)) return undefined;
+
+    const assumptions = Array.isArray(raw.assumptions)
+        ? raw.assumptions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : undefined;
+
+    return {
+        enabled: Boolean(raw.enabled),
+        program_id: typeof raw.program_id === 'string' ? raw.program_id : undefined,
+        program_title: typeof raw.program_title === 'string' ? raw.program_title : undefined,
+        assumptions,
+        coach_brief: typeof raw.coach_brief === 'string' ? raw.coach_brief : null,
+        next_action: typeof raw.next_action === 'string' ? raw.next_action : null,
+        focus_node: isJsonRecord(raw.focus_node) ? raw.focus_node as unknown as LearningNode : null,
+        assessment: isJsonRecord(raw.assessment) ? raw.assessment as unknown as LearningAssessmentResult : null,
+        learning_state: isJsonRecord(raw.learning_state) ? raw.learning_state as unknown as LearningState : null,
+        progress_checklist: Array.isArray(raw.progress_checklist)
+            ? raw.progress_checklist as unknown as LearningChecklistItem[]
+            : undefined,
+        memory_update_summary: isJsonRecord(raw.memory_update_summary)
+            ? raw.memory_update_summary as unknown as LearningMemoryUpdateSummary
+            : null,
+        turn_output: isJsonRecord(raw.turn_output) ? raw.turn_output as unknown as LearningTurnOutput : null,
     };
 }
 
@@ -3662,6 +3690,8 @@ export interface SmartChatRequest {
     mode?: 'fast' | 'deep';
     conversation_id?: string;
     workspace_id?: string;
+    learning_mode?: 'auto' | 'off' | 'teacher';
+    learning_program_id?: string;
     runtime_instruction?: string;
     temperature?: number;
     max_tokens?: number;
@@ -3766,6 +3796,7 @@ export interface SmartChatResponse {
     memory?: MemoryContextMetadata;
     citations?: WebCitation[];
     web_search?: WebSearchMetadata;
+    learning?: LearningChatMetadata;
     usage?: {
         prompt_tokens: number;
         completion_tokens: number;
@@ -3782,6 +3813,7 @@ interface V1SmartChatCompletionResponse extends ChatCompletionResponse {
     memory?: MemoryContextMetadata;
     citations?: WebCitation[];
     web_search?: WebSearchMetadata;
+    learning?: LearningChatMetadata;
 }
 
 function buildSmartChatPayload(
@@ -3826,6 +3858,8 @@ function buildSmartChatPayload(
         mode: request.mode,
         conversation_id: request.conversation_id,
         workspace_id: request.workspace_id,
+        learning_mode: request.learning_mode,
+        learning_program_id: request.learning_program_id,
         runtime_instruction: request.runtime_instruction,
         use_memory: useMemory,
         use_knowledge: useKnowledge,
@@ -3915,6 +3949,7 @@ export async function sendSmartChat(
         memory: data.memory,
         citations: data.citations,
         web_search: data.web_search,
+        learning: data.learning,
         usage: data.usage,
         created_at: createdAt
     };
@@ -3933,6 +3968,7 @@ export async function* streamSmartChat(
     citations?: WebCitation[];
     webSearch?: WebSearchMetadata;
     memory?: MemoryContextMetadata;
+    learning?: LearningChatMetadata;
     usage?: StreamUsageMetadata;
 }, void, unknown> {
     const headers: Record<string, string> = {
@@ -3967,6 +4003,7 @@ export async function* streamSmartChat(
         citations?: WebCitation[],
         webSearch?: WebSearchMetadata,
         memory?: MemoryContextMetadata,
+        learning?: LearningChatMetadata,
         usage?: StreamUsageMetadata
     ): {
         content: string;
@@ -3974,6 +4011,7 @@ export async function* streamSmartChat(
         citations?: WebCitation[];
         webSearch?: WebSearchMetadata;
         memory?: MemoryContextMetadata;
+        learning?: LearningChatMetadata;
         usage?: StreamUsageMetadata;
     } => {
         if (content) {
@@ -3985,6 +4023,7 @@ export async function* streamSmartChat(
             citations?: WebCitation[];
             webSearch?: WebSearchMetadata;
             memory?: MemoryContextMetadata;
+            learning?: LearningChatMetadata;
             usage?: StreamUsageMetadata;
         } = { content };
         if (citations && citations.length > 0) {
@@ -3995,6 +4034,9 @@ export async function* streamSmartChat(
         }
         if (memory) {
             chunk.memory = memory;
+        }
+        if (learning) {
+            chunk.learning = learning;
         }
         if (usage) {
             chunk.usage = usage;
@@ -4015,6 +4057,7 @@ export async function* streamSmartChat(
         citations?: WebCitation[];
         webSearch?: WebSearchMetadata;
         memory?: MemoryContextMetadata;
+        learning?: LearningChatMetadata;
         usage?: StreamUsageMetadata;
     } => {
         const payload = parseStreamPayloadFromEvent(eventBlock);
@@ -4037,6 +4080,7 @@ export async function* streamSmartChat(
             citations: extractCitationsFromPayload(payload),
             webSearch: extractWebSearchMetadataFromPayload(payload),
             memory: extractMemoryContextMetadataFromPayload(payload),
+            learning: extractLearningMetadataFromPayload(payload),
             usage: extractUsageFromPayload(payload),
         };
     };
@@ -4057,12 +4101,13 @@ export async function* streamSmartChat(
                     continue;
                 }
                 const processed = processEvent(eventBlock);
-                if (processed.content || processed.citations || processed.webSearch || processed.memory || processed.usage) {
+                if (processed.content || processed.citations || processed.webSearch || processed.memory || processed.learning || processed.usage) {
                     yield emitChunk(
                         processed.content || '',
                         processed.citations,
                         processed.webSearch,
                         processed.memory,
+                        processed.learning,
                         processed.usage
                     );
                 }
@@ -4076,12 +4121,13 @@ export async function* streamSmartChat(
             if (isDoneSseEvent(buffer)) {
             } else {
                 const processed = processEvent(buffer);
-                if (processed.content || processed.citations || processed.webSearch || processed.memory || processed.usage) {
+                if (processed.content || processed.citations || processed.webSearch || processed.memory || processed.learning || processed.usage) {
                     yield emitChunk(
                         processed.content || '',
                         processed.citations,
                         processed.webSearch,
                         processed.memory,
+                        processed.learning,
                         processed.usage
                     );
                 }
@@ -4110,17 +4156,19 @@ export async function* streamSmartChat(
             const fallbackCitations = fallbackPayload ? extractCitationsFromPayload(fallbackPayload) : undefined;
             const fallbackWebSearch = fallbackPayload ? extractWebSearchMetadataFromPayload(fallbackPayload) : undefined;
             const fallbackMemory = fallbackPayload ? extractMemoryContextMetadataFromPayload(fallbackPayload) : undefined;
+            const fallbackLearning = fallbackPayload ? extractLearningMetadataFromPayload(fallbackPayload) : undefined;
             const fallbackUsage = fallbackPayload ? extractUsageFromPayload(fallbackPayload) : undefined;
             if (!resolvedConversationId && fallbackConversationId) {
                 resolvedConversationId = fallbackConversationId;
             }
 
-            if (fallbackContent || fallbackCitations || fallbackWebSearch || fallbackMemory || fallbackUsage) {
+            if (fallbackContent || fallbackCitations || fallbackWebSearch || fallbackMemory || fallbackLearning || fallbackUsage) {
                 const chunk = emitChunk(
                     fallbackContent || '',
                     fallbackCitations,
                     fallbackWebSearch,
                     fallbackMemory,
+                    fallbackLearning,
                     fallbackUsage
                 );
                 if (fallbackConversationId) {
@@ -4209,6 +4257,373 @@ export interface KnowledgeItem {
     content_type: KnowledgeContentType | string;
     is_favorite: boolean;
     is_pinned: boolean;
+}
+
+export interface LearningWorkspaceResource {
+    id: string;
+    title: string;
+    content_type: string;
+    is_favorite: boolean;
+}
+
+export interface LearningGoal {
+    goal_id: string;
+    raw_goal: string;
+    operational_goal: string;
+    deadline: string | null;
+    success_criteria: string[];
+    constraints: string[];
+    status: string;
+    milestones?: Array<{
+        node_id: string;
+        node_key: string;
+        title: string;
+    }>;
+}
+
+export interface LearningChecklistItem {
+    item_id: string;
+    node_id?: string;
+    label: string;
+    status: string;
+    linked_skill_ids?: string[];
+    reason?: string;
+    evidence_ids?: string[];
+    next_verification_action?: string;
+}
+
+export interface LearningEvidenceItem {
+    evidence_id: string;
+    type: string;
+    skill_ids: string[];
+    strength: string;
+    summary: string;
+    used_hints?: boolean;
+    source_turn_id?: string;
+    timestamp?: string;
+}
+
+export interface LearningMemoryUpdateSummary {
+    added: string[];
+    revised: string[];
+    downgraded: string[];
+    confidence: number;
+}
+
+export interface LearningTurnOutput {
+    instructional_mode: string;
+    assistant_message: string;
+    progress_checklist: LearningChecklistItem[];
+    memory_update_summary: LearningMemoryUpdateSummary;
+    evidence_collected: Array<string | LearningEvidenceItem>;
+    selected_source_refs?: string[];
+    confidence_level?: number;
+    next_step: string | null;
+    focus_node_id?: string | null;
+    focus_node_title?: string | null;
+}
+
+export interface LearningState {
+    session_id: string;
+    learner_id: string;
+    locale: string;
+    current_goal: LearningGoal;
+    learner_profile: {
+        estimated_level: string;
+        pace: string;
+        preferred_explanation_style: string;
+        language_preference: string;
+        motivation_notes: string[];
+    };
+    knowledge_map: {
+        skills: Array<{
+            skill_id: string;
+            node_id?: string;
+            name: string;
+            prerequisites: string[];
+            mastery_status: string;
+            confidence: number;
+            last_evidence_ids: string[];
+            misconceptions: string[];
+            review_due: string | null;
+        }>;
+    };
+    progress_checklist: LearningChecklistItem[];
+    evidence_log: LearningEvidenceItem[];
+    source_registry: {
+        focus_terms?: string[];
+        sources: Array<{
+            source_id: string;
+            file_name: string;
+            file_type: string;
+            quality_score: number;
+            coverage_summary: string;
+            warnings: string[];
+            excerpt?: string | null;
+            source_ref?: string | null;
+            anchor_label?: string | null;
+            anchor_ref?: string | null;
+            matched_terms?: string[];
+            relevance_score?: number;
+            is_favorite?: boolean;
+        }>;
+    };
+    memory: {
+        session_memory: Record<string, unknown>;
+        learner_long_term_memory: Array<Record<string, unknown>>;
+        source_grounded_memory: Array<Record<string, unknown>>;
+    };
+    review_summary?: {
+        due_now: number;
+        due_soon: number;
+        verified_nodes: number;
+        weak_nodes: number;
+        review_pressure: 'low' | 'medium' | 'high' | string;
+    } | null;
+    adaptive_plan?: {
+        deadline_status: 'none' | 'on_track' | 'at_risk' | 'urgent' | string;
+        days_left: number | null;
+        remaining_nodes: number;
+        recommended_sessions_per_week: number;
+        recommended_minutes_per_session: number;
+        review_pressure?: string | null;
+        due_now?: number;
+        due_soon?: number;
+        focus_reason?: string | null;
+        stalled_nodes?: Array<{
+            node_id: string;
+            title: string;
+            failures: number;
+            latest_score: number;
+            reason: string;
+        }>;
+    } | null;
+    focus_snapshot?: {
+        node_id: string;
+        title: string;
+        stage: string;
+        instructional_mode: string;
+        summary: string;
+        mastery_status: string;
+        mastery_score: number;
+        review_due_at: string | null;
+        evidence_count: number;
+        next_verification_action: string;
+        reason?: string | null;
+        misconceptions?: string[];
+        success_criteria?: string[];
+    } | null;
+    last_memory_update_summary?: LearningMemoryUpdateSummary | null;
+    last_turn_output?: LearningTurnOutput | null;
+}
+
+export interface LearningNode {
+    id: string;
+    program_id: string;
+    position: number;
+    node_key: string;
+    stage: string;
+    title: string;
+    summary: string;
+    explanation: string;
+    worked_example: string;
+    practice_task: string;
+    reflection_prompt: string;
+    estimated_minutes: number;
+    difficulty: number;
+    prerequisites: string[];
+    common_pitfalls: string[];
+    expected_keywords: string[];
+    success_criteria: string[];
+    resources: string[];
+    mastery_status: string;
+    mastery_score: number;
+    evidence_count: number;
+    last_practiced_at: string | null;
+    review_due_at: string | null;
+    completed_at: string | null;
+}
+
+export interface LearningChatMetadata {
+    enabled: boolean;
+    program_id?: string;
+    program_title?: string;
+    assumptions?: string[];
+    coach_brief?: string | null;
+    next_action?: string | null;
+    focus_node?: LearningNode | null;
+    assessment?: LearningAssessmentResult | null;
+    learning_state?: LearningState | null;
+    progress_checklist?: LearningChecklistItem[];
+    memory_update_summary?: LearningMemoryUpdateSummary | null;
+    turn_output?: LearningTurnOutput | null;
+}
+
+export interface LearningProgramSummary {
+    id: string;
+    title: string;
+    topic: string;
+    domain: string;
+    goal: string;
+    outcome_target: string | null;
+    current_level: string;
+    learning_style: string;
+    language: string;
+    weekly_minutes: number;
+    status: string;
+    workspace_id: string | null;
+    workspace_name: string | null;
+    completed_nodes: number;
+    total_nodes: number;
+    completion_ratio: number;
+    estimated_total_minutes: number;
+    due_review_count: number;
+    next_node_id: string | null;
+    next_node_title: string | null;
+    target_date: string | null;
+    pace_label: string | null;
+    active_goal?: LearningGoal | null;
+    last_turn_output?: LearningTurnOutput | null;
+    created_at: string | null;
+    updated_at: string | null;
+}
+
+export interface LearningLesson {
+    mode: string;
+    instructional_mode?: string;
+    opening_message: string;
+    next_action: string;
+    program: {
+        id: string;
+        title: string;
+        topic: string;
+        goal: string;
+        outcome_target: string | null;
+    };
+    node: LearningNode | null;
+    active_goal?: LearningGoal | null;
+    teaching_points: Array<string | null>;
+    worked_example: string;
+    practice_task: string;
+    reflection_prompt: string;
+    success_criteria: string[];
+    workspace_resources: LearningWorkspaceResource[];
+    progress_checklist?: LearningChecklistItem[];
+    memory_update_summary?: LearningMemoryUpdateSummary | null;
+    turn_output?: LearningTurnOutput | null;
+    learning_state_snapshot?: LearningState | null;
+}
+
+export interface LearningAssessmentResult {
+    score: number;
+    passed: boolean;
+    word_count: number;
+    matched_keywords: string[];
+    missing_keywords: string[];
+    matched_criteria?: string[];
+    missing_criteria?: string[];
+    strengths: string[];
+    misconceptions: string[];
+    feedback: string;
+    next_action: string;
+    success_criteria: string[];
+    mastery_band?: string;
+    instructional_mode?: string;
+    evidence_id?: string;
+    evidence_type?: string;
+    evidence_strength?: string;
+    evidence_summary?: string;
+    used_hints?: boolean;
+    node_id?: string;
+    assistant_message?: string;
+    progress_checklist?: LearningChecklistItem[];
+    memory_update_summary?: LearningMemoryUpdateSummary | null;
+    evidence_collected?: LearningEvidenceItem[];
+    selected_source_refs?: string[];
+    confidence_level?: number;
+    next_step?: string | null;
+    rubric: {
+        keyword_ratio: number;
+        criteria_score?: number;
+        length_score: number;
+        reasoning_score: number;
+        example_score: number;
+        structure_score: number;
+        transfer_score?: number;
+        grounding_score?: number;
+        originality_score?: number;
+        copy_similarity?: number;
+    };
+}
+
+export interface LearningSession {
+    id: string;
+    program_id: string;
+    node_id: string;
+    conversation_id: string | null;
+    status: string;
+    attempt_count: number;
+    lesson: LearningLesson;
+    feedback: LearningAssessmentResult | null;
+    turn_output?: LearningTurnOutput | null;
+    started_at: string | null;
+    updated_at: string | null;
+    completed_at: string | null;
+}
+
+export interface LearningProgramDetail extends LearningProgramSummary {
+    nodes: LearningNode[];
+    latest_session: LearningSession | null;
+    workspace_resources: LearningWorkspaceResource[];
+    learning_state?: LearningState | null;
+    progress_checklist?: LearningChecklistItem[];
+    source_registry?: LearningState['source_registry'];
+    memory_update_summary?: LearningMemoryUpdateSummary | null;
+}
+
+export interface LearningLiveState {
+    enabled: boolean;
+    source: 'none' | 'selected' | 'conversation' | 'workspace_recent';
+    conversation_id: string | null;
+    program: LearningProgramDetail | null;
+    focus_node: LearningNode | null;
+    active_session: LearningSession | null;
+    assumptions: string[];
+    next_action: string | null;
+    coach_brief: string | null;
+    learning_state?: LearningState | null;
+    progress_checklist?: LearningChecklistItem[];
+    memory_update_summary?: LearningMemoryUpdateSummary | null;
+    turn_output?: LearningTurnOutput | null;
+}
+
+export interface LearningReviewItem {
+    program_id: string;
+    program_title: string;
+    node: LearningNode | null;
+}
+
+export interface CreateLearningProgramPayload {
+    title?: string | null;
+    topic: string;
+    goal: string;
+    outcome_target?: string | null;
+    current_level?: string;
+    learning_style?: string;
+    weekly_minutes?: number;
+    workspace_id?: string | null;
+    target_date?: string | null;
+    language?: string;
+}
+
+export interface LearningSessionSubmissionResponse {
+    session: LearningSession;
+    result: LearningAssessmentResult;
+    node: LearningNode | null;
+    program: LearningProgramSummary;
+    next_node: LearningNode | null;
+    learning_state?: LearningState | null;
+    turn_output?: LearningTurnOutput | null;
 }
 
 // ===== Conversation API =====
@@ -4345,6 +4760,92 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
     await apiRequest<{ ok: boolean }>(`/memory/workspaces/${workspaceId}`, {
         method: 'DELETE'
     });
+}
+
+// ===== Guided Learning API =====
+
+export async function getLearningPrograms(workspaceId?: string | null): Promise<LearningProgramSummary[]> {
+    const params = new URLSearchParams();
+    if (workspaceId !== undefined) {
+        params.append('workspace_id', workspaceId ?? '');
+    }
+    const query = params.toString();
+    return apiRequest<LearningProgramSummary[]>(`/v1/learn/programs${query ? `?${query}` : ''}`);
+}
+
+export async function getLearningProgram(programId: string): Promise<LearningProgramDetail> {
+    return apiRequest<LearningProgramDetail>(`/v1/learn/programs/${programId}`);
+}
+
+export async function getLearningLiveState(options: {
+    conversationId?: string | null;
+    workspaceId?: string | null;
+    programId?: string | null;
+} = {}): Promise<LearningLiveState> {
+    const params = new URLSearchParams();
+    if (options.conversationId) {
+        params.append('conversation_id', options.conversationId);
+    }
+    if (options.workspaceId !== undefined) {
+        params.append('workspace_id', options.workspaceId ?? '');
+    }
+    if (options.programId) {
+        params.append('program_id', options.programId);
+    }
+    const query = params.toString();
+    return apiRequest<LearningLiveState>(`/v1/learn/live${query ? `?${query}` : ''}`);
+}
+
+export async function createLearningProgram(payload: CreateLearningProgramPayload): Promise<LearningProgramDetail> {
+    return apiRequest<LearningProgramDetail>('/v1/learn/programs', {
+        method: 'POST',
+        body: JSON.stringify({
+            title: payload.title ?? null,
+            topic: payload.topic,
+            goal: payload.goal,
+            outcome_target: payload.outcome_target ?? null,
+            current_level: payload.current_level ?? 'beginner',
+            learning_style: payload.learning_style ?? 'guided',
+            weekly_minutes: payload.weekly_minutes ?? 180,
+            workspace_id: payload.workspace_id ?? null,
+            target_date: payload.target_date ?? null,
+            language: payload.language ?? 'vi'
+        })
+    });
+}
+
+export async function deleteLearningProgram(programId: string): Promise<void> {
+    await apiRequest<{ ok: boolean }>(`/v1/learn/programs/${programId}`, {
+        method: 'DELETE'
+    });
+}
+
+export async function startLearningSession(programId: string, nodeId?: string | null): Promise<LearningSession> {
+    return apiRequest<LearningSession>(`/v1/learn/programs/${programId}/sessions`, {
+        method: 'POST',
+        body: JSON.stringify({
+            node_id: nodeId ?? null
+        })
+    });
+}
+
+export async function submitLearningSessionResponse(
+    sessionId: string,
+    answer: string
+): Promise<LearningSessionSubmissionResponse> {
+    return apiRequest<LearningSessionSubmissionResponse>(`/v1/learn/sessions/${sessionId}/responses`, {
+        method: 'POST',
+        body: JSON.stringify({ answer })
+    });
+}
+
+export async function getLearningReviews(workspaceId?: string | null): Promise<LearningReviewItem[]> {
+    const params = new URLSearchParams();
+    if (workspaceId !== undefined) {
+        params.append('workspace_id', workspaceId ?? '');
+    }
+    const query = params.toString();
+    return apiRequest<LearningReviewItem[]>(`/v1/learn/reviews${query ? `?${query}` : ''}`);
 }
 
 // ===== Knowledge API =====

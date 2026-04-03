@@ -7,7 +7,7 @@
 
 import { useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { FileText, FolderOpen, Hash, Search } from 'lucide-react'
+import { FileText, FolderOpen, Hash, MessageSquare, Search } from 'lucide-react'
 import type { MentionItem } from '../../../hooks/useMention'
 import { useI18n } from '../../../contexts/I18nContext'
 import './MentionPopup.css'
@@ -122,10 +122,11 @@ export default function MentionPopup({
                             items.map((item, index) => {
                                 const isActive = index === activeIndex
                                 const emojiIcon = item.type === 'file' ? getFileIcon(item.name) : null
+                                const itemMeta = item.subtitle || item.relativePath
 
                                 return (
                                     <button
-                                        key={`${item.type}:${item.relativePath}`}
+                                        key={`${item.type}:${item.referenceId || item.relativePath}`}
                                         ref={isActive ? activeItemRef : null}
                                         className={`mention-popup-item ${isActive ? 'active' : ''} mention-type-${item.type}`}
                                         onMouseEnter={() => onHover(index)}
@@ -137,6 +138,8 @@ export default function MentionPopup({
                                         <span className="mention-item-icon">
                                             {item.type === 'folder' ? (
                                                 <FolderOpen size={14} />
+                                            ) : item.type === 'conversation' ? (
+                                                <MessageSquare size={14} />
                                             ) : emojiIcon ? (
                                                 <span className="mention-item-emoji">{emojiIcon}</span>
                                             ) : (
@@ -144,7 +147,7 @@ export default function MentionPopup({
                                             )}
                                         </span>
                                         <span className="mention-item-name">{item.name}</span>
-                                        <span className="mention-item-path">{item.relativePath}</span>
+                                        <span className="mention-item-path">{itemMeta}</span>
                                     </button>
                                 )
                             })

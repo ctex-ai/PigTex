@@ -59,13 +59,18 @@ def upgrade() -> None:
         "_prisma_migrations",
     ]
 
-    op.execute("SET FOREIGN_KEY_CHECKS=0")
+    bind = op.get_bind()
+    dialect_name = bind.dialect.name
+
+    if dialect_name == "mysql":
+        op.execute("SET FOREIGN_KEY_CHECKS=0")
     try:
         for table_name in website_tables:
             if _table_exists(table_name):
                 op.drop_table(table_name)
     finally:
-        op.execute("SET FOREIGN_KEY_CHECKS=1")
+        if dialect_name == "mysql":
+            op.execute("SET FOREIGN_KEY_CHECKS=1")
 
     # Remove website-only columns from users table.
     if _table_exists("users"):

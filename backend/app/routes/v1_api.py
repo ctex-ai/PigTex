@@ -62,6 +62,7 @@ from .images import (
     save_base64_image_to_disk,
 )
 from ..search import SearchCoordinator, SearchContext
+from ..services.learning_service import LearningService
 from ..services.texapi_partner_service import TexApiPartnerService
 from ..upstream_request import UpstreamRequestConfig
 from ..provider_registry import (
@@ -388,6 +389,8 @@ class V1ChatCompletionRequest(BaseModel):
     web_search_max_results: Optional[int] = Field(default=None, ge=1, le=10)
     web_search_deep_read: Optional[bool] = None
     web_search_deep_verify: Optional[bool] = None
+    learning_mode: Optional[str] = "off"     # auto | off | teacher
+    learning_program_id: Optional[str] = None
     file_attachments: Optional[List[V1FileAttachment]] = None
 
 
@@ -5848,6 +5851,7 @@ async def v1_chat_completions(
                 request=request,
                 enabled=bool(request.use_memory),
             )
+            _learning_context: Optional[Dict[str, Any]] = None
 
             # ── Web search decision ──
             # Priority: explicit user request > query policy recommendation > weak model trigger > global default
@@ -5986,6 +5990,30 @@ async def v1_chat_completions(
                         ],
                     )
 
+            learning_mode = str(request.learning_mode or "auto").strip().lower()
+            if learning_mode not in {"auto", "off", "teacher"}:
+                learning_mode = "auto"
+            if latest_user_text and learning_mode != "off":
+                try:
+                    learning_service = LearningService(db, current_user)
+                    _learning_context = learning_service.sync_chat_copilot(
+                        conversation_id=_conversation_id,
+                        workspace_id=request.workspace_id,
+                        message_text=latest_user_text,
+                        learning_mode=learning_mode,
+                        preferred_program_id=request.learning_program_id,
+                    )
+                    learning_prompt = (
+                        _learning_context.get("system_prompt")
+                        if isinstance(_learning_context, dict)
+                        else None
+                    )
+                    if isinstance(learning_prompt, str) and learning_prompt.strip():
+                        _msgs = _prepend_system_message(_msgs, learning_prompt)
+                except Exception as e:
+                    logger.warning("Learning copilot skipped request_id=%s error=%s", request_id, e)
+                    _learning_context = None
+
             runtime_block = build_runtime_instruction_block(request.runtime_instruction or "")
             if runtime_block:
                 _msgs = _prepend_system_message(_msgs, runtime_block)
@@ -6015,6 +6043,7 @@ async def v1_chat_completions(
                 "search_context": _search_context,
                 "web_search_enabled": bool(search_enabled),
                 "memory_context_meta": _memory_context_meta,
+                "learning_context": _learning_context,
             }
         finally:
             _release_db_connection(db, reason="chat_prepare_done", request_id=request_id)
@@ -6049,6 +6078,7 @@ async def v1_chat_completions(
                 search_context=prep.get("search_context"),
                 web_search_enabled=bool(prep.get("web_search_enabled")),
                 memory_context_meta=prep.get("memory_context_meta"),
+                learning_context=prep.get("learning_context"),
                 request_id=request_id,
                 request_started_at=request_started_at,
             )
@@ -8087,6 +8117,7 @@ async def _handle_streaming(
     search_context: Optional[SearchContext] = None,
     web_search_enabled: bool = False,
     memory_context_meta: Optional[Dict[str, Any]] = None,
+    learning_context: Optional[Dict[str, Any]] = None,
     request_id: str = "",
     request_started_at: Optional[float] = None,
 ):
@@ -8103,6 +8134,7 @@ async def _handle_streaming(
     resolved_search_context = search_context
     resolved_web_search_enabled = web_search_enabled
     resolved_memory_context_meta = memory_context_meta
+    resolved_learning_context = learning_context
 
     def _extract_delta_content(raw_bytes: str) -> str:
         """Lightweight tap: pull text deltas from provider SSE for memory accumulation."""
@@ -8125,7 +8157,7 @@ async def _handle_streaming(
 
     async def stream_generator():
         nonlocal cfg, upstream_url, request_data, headers, coordinator, conversation_id
-        nonlocal resolved_search_context, resolved_web_search_enabled, resolved_memory_context_meta
+        nonlocal resolved_search_context, resolved_web_search_enabled, resolved_memory_context_meta, resolved_learning_context
         stream_started_at = perf_counter()
         first_chunk_at: Optional[float] = None
         chunk_count = 0
@@ -8157,6 +8189,7 @@ async def _handle_streaming(
                     prep.get("web_search_enabled", resolved_web_search_enabled)
                 )
                 resolved_memory_context_meta = prep.get("memory_context_meta", resolved_memory_context_meta)
+                resolved_learning_context = prep.get("learning_context", resolved_learning_context)
                 if conversation_id:
                     # Emit conversation id as early metadata so frontend can
                     # bind the new thread immediately even when response header
@@ -8170,6 +8203,10 @@ async def _handle_streaming(
                     yield f"data: {json.dumps(payload)}\n\n"
                 if isinstance(resolved_memory_context_meta, dict):
                     yield f"data: {json.dumps({'memory': resolved_memory_context_meta})}\n\n"
+                if isinstance(resolved_learning_context, dict) and resolved_learning_context.get("enabled"):
+                    learning_public_payload = dict(resolved_learning_context)
+                    learning_public_payload.pop("system_prompt", None)
+                    yield f"data: {json.dumps({'learning': learning_public_payload})}\n\n"
             except Exception as e:
                 logger.error("Lazy prepare failed request_id=%s: %s", request_id, e)
                 yield f'data: {{"error": {{"message": "Preparation failed: {e}", "type": "preparation_error"}}}}\n\n'
@@ -8448,6 +8485,7 @@ async def _handle_non_streaming(
     search_context: Optional[SearchContext] = None,
     web_search_enabled: bool = False,
     memory_context_meta: Optional[Dict[str, Any]] = None,
+    learning_context: Optional[Dict[str, Any]] = None,
     request_id: str = "",
     request_started_at: Optional[float] = None,
 ):
@@ -8742,6 +8780,10 @@ async def _handle_non_streaming(
             result["citations"] = search_context.citations
     if isinstance(memory_context_meta, dict):
         result["memory"] = memory_context_meta
+    if isinstance(learning_context, dict) and learning_context.get("enabled"):
+        learning_public_payload = dict(learning_context)
+        learning_public_payload.pop("system_prompt", None)
+        result["learning"] = learning_public_payload
 
     # Track usage + expose normalized usage metadata.
     raw_usage = result.get("usage", {})

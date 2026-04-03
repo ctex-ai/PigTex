@@ -37,6 +37,7 @@ from .routes import texapi_partner
 from .routes import images as images_routes
 from .routes import files as files_routes
 from .routes import skill_foundry as skill_foundry_routes
+from .routes import learning as learning_routes
 from .idempotency import IdempotencyMiddleware
 
 settings = get_settings()
@@ -105,6 +106,9 @@ app.include_router(files_routes.router, prefix="/api")
 
 # Skill Foundry API - offline prompt skill ingestion and runtime inspection
 app.include_router(skill_foundry_routes.router, prefix="/api")
+
+# Guided Learning API
+app.include_router(learning_routes.router, prefix="/api")
 
 
 

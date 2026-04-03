@@ -1,6 +1,5 @@
 ﻿import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useMemo } from 'react'
 import {
     Send,
     Sparkles,
@@ -44,7 +43,6 @@ import {
     MemoryContextMetadata,
     getLocalConversations,
     getLocalConversation,
-    getLearningLiveState,
     createConversation,
     addConversationMessage,
     updateConversationMessage,
@@ -63,7 +61,7 @@ import {
     modelSupportsCapability,
     transportSupportsCapability
 } from '../../../services/api'
-import type { LearningChatMetadata, LearningLiveState, LearningState } from '../../../services/api'
+import type { LearningChatMetadata } from '../../../services/api'
 import { PigTexSettings, resolveApiProviderForRequest } from '../../../services/settings'
 import { useI18n } from '../../../contexts/I18nContext'
 import MessageRenderer from '../../Shared/MessageRenderer'
@@ -2601,8 +2599,6 @@ const ChatPanel = ({
     const [isPreparingActionDiffs, setIsPreparingActionDiffs] = useState(false)
     const [currentConversationId, setCurrentConversationId] = useState<string | null>(conversationId || null)
     const [conversationWorkspaceId, setConversationWorkspaceId] = useState<string | null>(workspaceId || null)
-    const [learningLiveState, setLearningLiveState] = useState<LearningLiveState | null>(null)
-    const [isLearningLiveLoading, setIsLearningLiveLoading] = useState(false)
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -2742,69 +2738,6 @@ const ChatPanel = ({
             minute: '2-digit'
         }).format(date)
     }, [locale])
-    const learningCockpitCopy = isVietnamese ? {
-        cockpitTitle: 'Learn cockpit',
-        focus: 'Focus',
-        goal: 'Target',
-        nextAction: 'Next evidence',
-        deadline: 'Deadline',
-        reviewLoad: 'Review load',
-        remaining: 'Con lai',
-        dueNow: 'Den han',
-        stalled: 'Bi ket',
-        sources: 'Nguon dang uu tien',
-        misconceptions: 'Watch-outs',
-        successSignals: 'Dau hieu dat',
-        minutesPerSession: 'Phut/buoi',
-        sessionsPerWeek: 'Buoi/tuan',
-        loading: 'Dang cap nhat learn state...',
-        noData: 'Gui them muc tieu, bai lam hoac tai lieu de PigTex Learn khoi dong cockpit.',
-    } : {
-        cockpitTitle: 'Learn cockpit',
-        focus: 'Focus',
-        goal: 'Target',
-        nextAction: 'Next evidence',
-        deadline: 'Deadline',
-        reviewLoad: 'Review load',
-        remaining: 'Remaining',
-        dueNow: 'Due now',
-        stalled: 'Stalled',
-        sources: 'Preferred sources',
-        misconceptions: 'Watch-outs',
-        successSignals: 'Success signals',
-        minutesPerSession: 'Mins/session',
-        sessionsPerWeek: 'Sessions/week',
-        loading: 'Refreshing learning state...',
-        noData: 'Send a goal, response, or material to let PigTex Learn initialize the cockpit.',
-    }
-    const getLearningDeadlineStatusLabelLocal = (status?: string | null) => {
-        const normalized = (status || '').trim().toLowerCase()
-        const lookup: Record<string, string> = isVietnamese ? {
-            none: 'Chua co',
-            on_track: 'On track',
-            at_risk: 'Can day pace',
-            urgent: 'Gap'
-        } : {
-            none: 'No deadline',
-            on_track: 'On track',
-            at_risk: 'At risk',
-            urgent: 'Urgent'
-        }
-        return lookup[normalized] || normalized || (isVietnamese ? 'Chua co' : 'No deadline')
-    }
-    const getLearningReviewPressureLabelLocal = (pressure?: string | null) => {
-        const normalized = (pressure || '').trim().toLowerCase()
-        const lookup: Record<string, string> = isVietnamese ? {
-            low: 'Nhe',
-            medium: 'Vua',
-            high: 'Cao'
-        } : {
-            low: 'Low',
-            medium: 'Medium',
-            high: 'High'
-        }
-        return lookup[normalized] || normalized || (isVietnamese ? 'Nhe' : 'Low')
-    }
     const isTransientPendingMessageLocal = (message: string) => {
         const normalized = message.trim()
         return normalized === (isVietnamese ? 'Đang xử lý yêu cầu...' : 'Processing your request...')
@@ -2841,178 +2774,6 @@ const ChatPanel = ({
                 return ''
         }
     }
-    const getLearningModeLabelLocal = (mode?: string | null) => {
-        const normalized = (mode || '').trim().toLowerCase()
-        if (!normalized) return ''
-
-        const lookup: Record<string, string> = isVietnamese ? {
-            teach: 'Day hoc',
-            teacher: 'Day hoc',
-            explain: 'Giai thich',
-            lecture: 'Giai thich',
-            guided: 'Co huong dan',
-            guided_practice: 'Luyen co huong dan',
-            practice: 'Luyen tap',
-            independent_practice: 'Lam doc lap',
-            retrieval: 'Goi nho',
-            assess: 'Danh gia',
-            assessment: 'Danh gia',
-            review: 'On tap',
-            remediate: 'Cuong co',
-            summarize_progress: 'Tong ket',
-            transfer: 'Van dung'
-        } : {
-            teach: 'Teach',
-            teacher: 'Teach',
-            explain: 'Explain',
-            lecture: 'Explain',
-            guided: 'Guided',
-            guided_practice: 'Guided practice',
-            practice: 'Practice',
-            independent_practice: 'Independent practice',
-            retrieval: 'Retrieval',
-            assess: 'Assessment',
-            assessment: 'Assessment',
-            review: 'Review',
-            remediate: 'Remediate',
-            summarize_progress: 'Summary',
-            transfer: 'Transfer'
-        }
-
-        return lookup[normalized]
-            || normalized
-                .replace(/[_-]+/g, ' ')
-                .replace(/\b\w/g, (char) => char.toUpperCase())
-    }
-    const getLearningChecklistTone = (status?: string | null) => {
-        const normalized = (status || '').trim().toLowerCase()
-        if (['done', 'complete', 'completed', 'passed', 'mastered', 'verified'].includes(normalized)) {
-            return 'success'
-        }
-        if (['review_due', 'retry', 'needs_retry', 'blocked', 'partial'].includes(normalized)) {
-            return 'warning'
-        }
-        if (['failed', 'incorrect', 'downgraded'].includes(normalized)) {
-            return 'danger'
-        }
-        return 'neutral'
-    }
-    const getLearningChecklistStatusLabel = (status?: string | null) => {
-        const normalized = (status || '').trim().toLowerCase()
-        if (!normalized) return isVietnamese ? 'Dang theo doi' : 'Tracking'
-
-        const lookup: Record<string, string> = isVietnamese ? {
-            not_started: 'Chua bat dau',
-            pending: 'Cho lam',
-            diagnosing: 'Dang chan doan',
-            active: 'Dang hoc',
-            partial: 'Chua vung',
-            in_progress: 'Dang lam',
-            done: 'Hoan tat',
-            complete: 'Hoan tat',
-            completed: 'Hoan tat',
-            passed: 'Dat',
-            mastered: 'Vung',
-            verified: 'Da xac nhan',
-            review_due: 'Can on',
-            retry: 'Lam lai',
-            needs_retry: 'Lam lai',
-            blocked: 'Tac'
-        } : {
-            not_started: 'Not started',
-            pending: 'Pending',
-            diagnosing: 'Diagnosing',
-            active: 'Active',
-            partial: 'Partial',
-            in_progress: 'In progress',
-            done: 'Done',
-            complete: 'Done',
-            completed: 'Done',
-            passed: 'Passed',
-            mastered: 'Mastered',
-            verified: 'Verified',
-            review_due: 'Review due',
-            retry: 'Retry',
-            needs_retry: 'Retry',
-            blocked: 'Blocked'
-        }
-
-        return lookup[normalized]
-            || normalized
-                .replace(/[_-]+/g, ' ')
-                .replace(/\b\w/g, (char) => char.toUpperCase())
-    }
-    const buildLearningDetailState = useCallback((learning?: LearningChatMetadata) => {
-        if (!learning) return null
-
-        const checklist = (
-            learning.turn_output?.progress_checklist
-            || learning.progress_checklist
-            || learning.assessment?.progress_checklist
-            || learning.learning_state?.progress_checklist
-            || []
-        ).filter(item => item && item.label).slice(0, 4)
-
-        const evidence = (
-            learning.turn_output?.evidence_collected
-            || learning.assessment?.evidence_collected
-            || []
-        ).slice(0, 3)
-        const sourceRefs = (
-            learning.turn_output?.selected_source_refs
-            || []
-        ).slice(0, 3)
-
-        const memorySummary =
-            learning.turn_output?.memory_update_summary
-            || learning.memory_update_summary
-            || learning.assessment?.memory_update_summary
-            || learning.learning_state?.last_memory_update_summary
-            || null
-
-        const goal =
-            learning.learning_state?.current_goal?.operational_goal
-            || learning.learning_state?.current_goal?.raw_goal
-            || learning.coach_brief
-            || null
-
-        const mode =
-            learning.turn_output?.instructional_mode
-            || learning.assessment?.instructional_mode
-            || null
-
-        const nextStep =
-            learning.turn_output?.next_step
-            || learning.assessment?.next_step
-            || learning.next_action
-            || null
-
-        const focusTitle =
-            learning.turn_output?.focus_node_title
-            || learning.focus_node?.title
-            || learning.program_title
-            || null
-
-        const hasMemory = Boolean(
-            memorySummary
-            && (memorySummary.added.length || memorySummary.revised.length || memorySummary.downgraded.length || memorySummary.confidence)
-        )
-
-        if (!goal && !mode && !nextStep && !focusTitle && checklist.length === 0 && evidence.length === 0 && sourceRefs.length === 0 && !hasMemory) {
-            return null
-        }
-
-        return {
-            goal,
-            mode,
-            nextStep,
-            focusTitle,
-            checklist,
-            evidence,
-            sourceRefs,
-            memorySummary: hasMemory ? memorySummary : null
-        }
-    }, [])
     const getClaimVerdictLabelLocal = (verdict: WebSearchClaimVerification['verdict']) => {
         switch (verdict) {
             case 'supported':
@@ -3347,58 +3108,6 @@ const ChatPanel = ({
         learningProgramId,
         selectedImageTool.id,
         selectedMode.id
-    ])
-
-    useEffect(() => {
-        const activeWorkspaceId = conversationWorkspaceId || workspaceId || null
-        const hasEmbeddedLearning = messages.some((message) => (
-            Boolean(message.learning?.program_id)
-            || Boolean(message.learning?.learning_state)
-        ))
-        const shouldLoadLearning =
-            selectedMode.id === 'learn'
-            || Boolean(learningProgramId)
-            || hasEmbeddedLearning
-
-        if (!shouldLoadLearning) {
-            setLearningLiveState(null)
-            setIsLearningLiveLoading(false)
-            return
-        }
-
-        let cancelled = false
-        setIsLearningLiveLoading(true)
-
-        void getLearningLiveState({
-            conversationId: currentConversationId || undefined,
-            workspaceId: activeWorkspaceId,
-            programId: learningProgramId || undefined
-        })
-            .then((data) => {
-                if (cancelled) return
-                setLearningLiveState(data.enabled ? data : null)
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setLearningLiveState(null)
-                }
-            })
-            .finally(() => {
-                if (!cancelled) {
-                    setIsLearningLiveLoading(false)
-                }
-            })
-
-        return () => {
-            cancelled = true
-        }
-    }, [
-        selectedMode.id,
-        learningProgramId,
-        currentConversationId,
-        conversationWorkspaceId,
-        workspaceId,
-        messages.length
     ])
 
     useEffect(() => {
@@ -6081,58 +5790,6 @@ const ChatPanel = ({
     const hasPendingAssistantMessage = messages.some(hasPendingAssistantWork)
     const isInputLocked = isTyping || sendInFlightRef.current || hasPendingAssistantMessage
     const activeLearningProgramTitle = (learningProgramTitle || '').trim()
-    const latestLearningMetadata = useMemo(() => {
-        const lastLearningMessage = [...messages].reverse().find((message) => (
-            Boolean(message.learning?.learning_state)
-            || Boolean(message.learning?.focus_node)
-            || Boolean(message.learning?.turn_output)
-        ))
-        return lastLearningMessage?.learning || null
-    }, [messages])
-    const learningCockpitState = learningLiveState?.learning_state || latestLearningMetadata?.learning_state || null
-    const learningCockpitFocus = learningLiveState?.focus_node || latestLearningMetadata?.focus_node || null
-    const learningCockpitAdaptive = learningCockpitState?.adaptive_plan || null
-    const learningCockpitReview = learningCockpitState?.review_summary || null
-    const learningCockpitSnapshot = learningCockpitState?.focus_snapshot || null
-    const learningCockpitSources: LearningState['source_registry']['sources'] = (learningCockpitState?.source_registry?.sources || []).slice(0, 3)
-    const learningCockpitFocusSkill = (learningCockpitState?.knowledge_map?.skills || []).find(
-        (skill: LearningState['knowledge_map']['skills'][number]) => skill.node_id === learningCockpitFocus?.id
-    ) || null
-    const learningCockpitProgramTitle =
-        learningLiveState?.program?.title
-        || activeLearningProgramTitle
-        || learningLiveState?.program?.topic
-        || latestLearningMetadata?.program_title
-        || null
-    const learningCockpitFocusTitle =
-        learningCockpitSnapshot?.title
-        || learningCockpitFocus?.title
-        || learningCockpitProgramTitle
-        || null
-    const learningCockpitGoal =
-        learningCockpitState?.current_goal?.operational_goal
-        || learningCockpitState?.current_goal?.raw_goal
-        || null
-    const learningCockpitNextAction =
-        learningCockpitSnapshot?.next_verification_action
-        || learningCockpitState?.last_turn_output?.next_step
-        || learningLiveState?.next_action
-        || null
-    const learningCockpitMisconceptions: string[] = (
-        learningCockpitSnapshot?.misconceptions
-        || learningCockpitFocusSkill?.misconceptions
-        || []
-    ).slice(0, 3)
-    const learningCockpitSuccessSignals: string[] = (learningCockpitSnapshot?.success_criteria || []).slice(0, 3)
-    const showLearningCockpit = selectedMode.id === 'learn' && (
-        Boolean(learningCockpitProgramTitle)
-        || Boolean(learningCockpitGoal)
-        || Boolean(learningCockpitFocusTitle)
-        || learningCockpitSources.length > 0
-        || Boolean(learningCockpitAdaptive)
-        || Boolean(learningCockpitReview)
-        || isLearningLiveLoading
-    )
     const canSend = !isInputLocked && (
         isImageToolMode
             ? Boolean(inputValue.trim())
@@ -6155,11 +5812,11 @@ const ChatPanel = ({
                     ? (
                         activeLearningProgramTitle
                             ? (isVietnamese
-                                ? `Tiep tuc "${activeLearningProgramTitle}" hoac gui them bai/tai lieu cho PigTex Learn...`
-                                : `Continue "${activeLearningProgramTitle}" or attach material for PigTex Learn...`)
+                                ? `Tiep tuc "${activeLearningProgramTitle}" hoac gui them bai/tai lieu...`
+                                : `Continue "${activeLearningProgramTitle}" or attach more material...`)
                             : (isVietnamese
-                                ? 'Noi muc tieu hoc hoac gui bai/tai lieu de PigTex day theo mode Learn...'
-                                : 'Describe your learning goal or attach material for PigTex Learn...')
+                                ? 'Noi muc tieu hoc hoac gui bai/tai lieu...'
+                                : 'Describe what you want to learn or attach material...')
                     )
                 : (imageAttachments.length > 0 || fileAttachments.length > 0
             ? copy.attachmentPrompt
@@ -6671,166 +6328,6 @@ const ChatPanel = ({
                                                     </div>
                                                 </details>
                                             )}
-                                            {(() => {
-                                                const learningDetails = buildLearningDetailState(message.learning)
-                                                if (!learningDetails) return null
-
-                                                return (
-                                                    <details className="message-learning-details">
-                                                        <summary className="message-learning-summary">
-                                                            <span>{copy.learningDetails}</span>
-                                                            {learningDetails.focusTitle && (
-                                                                <span className="message-learning-summary-tag">
-                                                                    {learningDetails.focusTitle}
-                                                                </span>
-                                                            )}
-                                                            <ChevronDown size={14} className="message-learning-summary-icon" />
-                                                        </summary>
-                                                        <div className="message-learning-details-content">
-                                                            {(learningDetails.goal || learningDetails.mode || learningDetails.nextStep) && (
-                                                                <div className="message-learning-grid">
-                                                                    {learningDetails.goal && (
-                                                                        <div className="message-learning-field">
-                                                                            <span className="message-learning-label">{copy.learningGoal}</span>
-                                                                            <span className="message-learning-value">{learningDetails.goal}</span>
-                                                                        </div>
-                                                                    )}
-                                                                    {learningDetails.mode && (
-                                                                        <div className="message-learning-field">
-                                                                            <span className="message-learning-label">{copy.learningMode}</span>
-                                                                            <span className="message-learning-value">
-                                                                                {getLearningModeLabelLocal(learningDetails.mode)}
-                                                                            </span>
-                                                                        </div>
-                                                                    )}
-                                                                    {learningDetails.nextStep && (
-                                                                        <div className="message-learning-field">
-                                                                            <span className="message-learning-label">{copy.learningNextStep}</span>
-                                                                            <span className="message-learning-value">{learningDetails.nextStep}</span>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            )}
-
-                                                            {learningDetails.checklist.length > 0 && (
-                                                                <div className="message-learning-section">
-                                                                    <span className="message-learning-section-title">{copy.learningChecklist}</span>
-                                                                    <div className="message-learning-list">
-                                                                        {learningDetails.checklist.map((item) => (
-                                                                            <div
-                                                                                key={`${message.id}-learning-check-${item.item_id}`}
-                                                                                className="message-learning-check-item"
-                                                                            >
-                                                                                <span className={`message-learning-status message-learning-status-${getLearningChecklistTone(item.status)}`}>
-                                                                                    {getLearningChecklistStatusLabel(item.status)}
-                                                                                </span>
-                                                                                <div className="message-learning-body">
-                                                                                    <span className="message-learning-item-title">{item.label}</span>
-                                                                                    {item.reason && (
-                                                                                        <span className="message-learning-item-meta">{item.reason}</span>
-                                                                                    )}
-                                                                                </div>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-
-                                                            {learningDetails.evidence.length > 0 && (
-                                                                <div className="message-learning-section">
-                                                                    <span className="message-learning-section-title">{copy.learningEvidence}</span>
-                                                                    <div className="message-learning-list">
-                                                                        {learningDetails.evidence.map((item, evidenceIndex) => (
-                                                                            <div
-                                                                                key={`${message.id}-learning-evidence-${evidenceIndex}`}
-                                                                                className="message-learning-evidence-item"
-                                                                            >
-                                                                                {typeof item === 'string' ? (
-                                                                                    <span className="message-learning-value">{item}</span>
-                                                                                ) : (
-                                                                                    <div className="message-learning-body">
-                                                                                        <div className="message-learning-evidence-header">
-                                                                                            <span className="message-learning-item-title">{item.summary}</span>
-                                                                                            <span className="message-learning-evidence-strength">
-                                                                                                {(item.strength || '').trim() || (isVietnamese ? 'Bang chung' : 'Evidence')}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                        {(item.type || item.timestamp) && (
-                                                                                            <span className="message-learning-item-meta">
-                                                                                                {item.type || (isVietnamese ? 'Cap nhat' : 'Updated')}
-                                                                                                {item.timestamp ? ` • ${formatUiDateTime(item.timestamp)}` : ''}
-                                                                                            </span>
-                                                                                        )}
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-
-                                                            {learningDetails.sourceRefs.length > 0 && (
-                                                                <div className="message-learning-section">
-                                                                    <span className="message-learning-section-title">{copy.learningSources}</span>
-                                                                    <div className="message-learning-list">
-                                                                        {learningDetails.sourceRefs.map((item: string, sourceIndex: number) => (
-                                                                            <div
-                                                                                key={`${message.id}-learning-source-${sourceIndex}`}
-                                                                                className="message-learning-evidence-item"
-                                                                            >
-                                                                                <span className="message-learning-value">{item}</span>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-
-                                                            {learningDetails.memorySummary && (
-                                                                <div className="message-learning-section">
-                                                                    <span className="message-learning-section-title">{copy.learningMemory}</span>
-                                                                    <div className="message-learning-memory">
-                                                                        {learningDetails.memorySummary.added.length > 0 && (
-                                                                            <div className="message-learning-memory-block">
-                                                                                <span className="message-learning-memory-label">
-                                                                                    {isVietnamese ? 'Them vao nho' : 'Added'}
-                                                                                </span>
-                                                                                <span className="message-learning-memory-value">
-                                                                                    {learningDetails.memorySummary.added.join(' • ')}
-                                                                                </span>
-                                                                            </div>
-                                                                        )}
-                                                                        {learningDetails.memorySummary.revised.length > 0 && (
-                                                                            <div className="message-learning-memory-block">
-                                                                                <span className="message-learning-memory-label">
-                                                                                    {isVietnamese ? 'Dieu chinh' : 'Revised'}
-                                                                                </span>
-                                                                                <span className="message-learning-memory-value">
-                                                                                    {learningDetails.memorySummary.revised.join(' • ')}
-                                                                                </span>
-                                                                            </div>
-                                                                        )}
-                                                                        {learningDetails.memorySummary.downgraded.length > 0 && (
-                                                                            <div className="message-learning-memory-block">
-                                                                                <span className="message-learning-memory-label">
-                                                                                    {isVietnamese ? 'Can xem lai' : 'Downgraded'}
-                                                                                </span>
-                                                                                <span className="message-learning-memory-value">
-                                                                                    {learningDetails.memorySummary.downgraded.join(' • ')}
-                                                                                </span>
-                                                                            </div>
-                                                                        )}
-                                                                        {learningDetails.memorySummary.confidence > 0 && (
-                                                                            <span className="message-learning-memory-confidence">
-                                                                                {copy.confidence}: {Math.round(learningDetails.memorySummary.confidence * 100)}%
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </details>
-                                                )
-                                            })()}
                                         </>
                                     )}
 
@@ -7152,147 +6649,6 @@ const ChatPanel = ({
                                 )}
                             </div>
                         </>
-                    )}
-
-                    {selectedMode.id === 'learn' && (
-                        showLearningCockpit ? (
-                            <div className="chat-learning-cockpit">
-                                <div className="chat-learning-cockpit-header">
-                                    <div className="chat-learning-cockpit-title-wrap">
-                                        <span className="chat-learning-cockpit-label">{learningCockpitCopy.cockpitTitle}</span>
-                                        {learningCockpitProgramTitle && (
-                                            <span className="chat-learning-cockpit-program">{learningCockpitProgramTitle}</span>
-                                        )}
-                                    </div>
-                                    {learningCockpitFocusTitle && (
-                                        <span className="chat-learning-cockpit-focus">{learningCockpitFocusTitle}</span>
-                                    )}
-                                </div>
-
-                                {isLearningLiveLoading && (
-                                    <div className="chat-learning-cockpit-note">{learningCockpitCopy.loading}</div>
-                                )}
-
-                                <div className="chat-learning-cockpit-stats">
-                                    <div className="chat-learning-cockpit-stat">
-                                        <span>{learningCockpitCopy.deadline}</span>
-                                        <strong>
-                                            {getLearningDeadlineStatusLabelLocal(learningCockpitAdaptive?.deadline_status)}
-                                            {typeof learningCockpitAdaptive?.days_left === 'number' ? ` • ${learningCockpitAdaptive.days_left}d` : ''}
-                                        </strong>
-                                    </div>
-                                    <div className="chat-learning-cockpit-stat">
-                                        <span>{learningCockpitCopy.reviewLoad}</span>
-                                        <strong>{getLearningReviewPressureLabelLocal(learningCockpitReview?.review_pressure || learningCockpitAdaptive?.review_pressure)}</strong>
-                                    </div>
-                                    <div className="chat-learning-cockpit-stat">
-                                        <span>{learningCockpitCopy.remaining}</span>
-                                        <strong>{learningCockpitAdaptive?.remaining_nodes ?? '—'}</strong>
-                                    </div>
-                                    <div className="chat-learning-cockpit-stat">
-                                        <span>{learningCockpitCopy.dueNow}</span>
-                                        <strong>{learningCockpitReview?.due_now ?? learningCockpitAdaptive?.due_now ?? 0}</strong>
-                                    </div>
-                                    <div className="chat-learning-cockpit-stat">
-                                        <span>{learningCockpitCopy.sessionsPerWeek}</span>
-                                        <strong>{learningCockpitAdaptive?.recommended_sessions_per_week ?? '—'}</strong>
-                                    </div>
-                                    <div className="chat-learning-cockpit-stat">
-                                        <span>{learningCockpitCopy.minutesPerSession}</span>
-                                        <strong>{learningCockpitAdaptive?.recommended_minutes_per_session ?? '—'}</strong>
-                                    </div>
-                                </div>
-
-                                {(learningCockpitGoal || learningCockpitNextAction || learningCockpitSnapshot?.summary) && (
-                                    <div className="chat-learning-cockpit-grid">
-                                        {learningCockpitGoal && (
-                                            <div className="chat-learning-cockpit-field">
-                                                <span>{learningCockpitCopy.goal}</span>
-                                                <strong>{learningCockpitGoal}</strong>
-                                            </div>
-                                        )}
-                                        {learningCockpitSnapshot?.summary && (
-                                            <div className="chat-learning-cockpit-field">
-                                                <span>{learningCockpitCopy.focus}</span>
-                                                <strong>{learningCockpitSnapshot.summary}</strong>
-                                            </div>
-                                        )}
-                                        {learningCockpitNextAction && (
-                                            <div className="chat-learning-cockpit-field">
-                                                <span>{learningCockpitCopy.nextAction}</span>
-                                                <strong>{learningCockpitNextAction}</strong>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {(learningCockpitMisconceptions.length > 0 || learningCockpitSuccessSignals.length > 0 || learningCockpitSources.length > 0 || (learningCockpitAdaptive?.stalled_nodes?.length || 0) > 0) && (
-                                    <div className="chat-learning-cockpit-columns">
-                                        {learningCockpitMisconceptions.length > 0 && (
-                                            <div className="chat-learning-cockpit-section">
-                                                <span>{learningCockpitCopy.misconceptions}</span>
-                                                <div className="chat-learning-cockpit-list">
-                                                    {learningCockpitMisconceptions.map((item: string, index: number) => (
-                                                        <div key={`learning-mis-${index}`} className="chat-learning-cockpit-chip">
-                                                            {item}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {learningCockpitSuccessSignals.length > 0 && (
-                                            <div className="chat-learning-cockpit-section">
-                                                <span>{learningCockpitCopy.successSignals}</span>
-                                                <div className="chat-learning-cockpit-list">
-                                                    {learningCockpitSuccessSignals.map((item: string, index: number) => (
-                                                        <div key={`learning-success-${index}`} className="chat-learning-cockpit-chip chat-learning-cockpit-chip-success">
-                                                            {item}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {(learningCockpitAdaptive?.stalled_nodes?.length || 0) > 0 && (
-                                            <div className="chat-learning-cockpit-section">
-                                                <span>{learningCockpitCopy.stalled}</span>
-                                                <div className="chat-learning-cockpit-list">
-                                                    {(learningCockpitAdaptive?.stalled_nodes || []).slice(0, 2).map((item: NonNullable<NonNullable<LearningState['adaptive_plan']>['stalled_nodes']>[number]) => (
-                                                        <div key={item.node_id} className="chat-learning-cockpit-chip chat-learning-cockpit-chip-warning">
-                                                            {item.title} • {item.failures}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {learningCockpitSources.length > 0 && (
-                                            <div className="chat-learning-cockpit-section">
-                                                <span>{learningCockpitCopy.sources}</span>
-                                                <div className="chat-learning-cockpit-sources">
-                                                    {learningCockpitSources.map((source: LearningState['source_registry']['sources'][number]) => (
-                                                        <div key={source.source_id} className="chat-learning-cockpit-source">
-                                                            <strong>{source.file_name}</strong>
-                                                            {source.excerpt && (
-                                                                <span>{source.excerpt}</span>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="chat-learning-focus">
-                                <span className="chat-learning-focus-label">
-                                    {isVietnamese ? 'PigTex Learn' : 'PigTex Learn'}
-                                </span>
-                                <span className="chat-learning-cockpit-note">{learningCockpitCopy.noData}</span>
-                            </div>
-                        )
                     )}
 
                     {/* Textarea */}

@@ -694,6 +694,17 @@ export interface CloudSyncPullResponse {
     stats: Record<string, number>;
 }
 
+export interface TexApiPartnerUsageSummary {
+    remaining_credits_usd: number | null;
+    total_credits_usd: number | null;
+    used_credits_usd: number | null;
+    total_requests: number | null;
+    currency: string;
+    period_start: string | null;
+    period_end: string | null;
+    raw: Record<string, unknown>;
+}
+
 // ===== Chat Types =====
 export interface ChatMessage {
     role: 'user' | 'assistant' | 'system';
@@ -2128,6 +2139,130 @@ export async function registerCloudDevice(
 
 export async function getCloudUsage(): Promise<CloudUsageSummary> {
     return apiRequest<CloudUsageSummary>('/cloud/usage');
+}
+
+function parseTexApiUsageNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().replace(/,/g, '');
+        if (!normalized) return null;
+        const parsed = Number(normalized);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function parseTexApiUsageString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function collectTexApiUsageRecords(root: JsonRecord): JsonRecord[] {
+    const records: JsonRecord[] = [root];
+    for (const key of ['summary', 'usage', 'budget', 'credits', 'balance', 'period', 'window']) {
+        const nested = root[key];
+        if (isJsonRecord(nested)) {
+            records.push(nested);
+        }
+    }
+    return records;
+}
+
+function pickTexApiUsageNumber(records: JsonRecord[], keys: string[]): number | null {
+    for (const record of records) {
+        for (const key of keys) {
+            const parsed = parseTexApiUsageNumber(record[key]);
+            if (parsed !== null) {
+                return parsed;
+            }
+        }
+    }
+    return null;
+}
+
+function pickTexApiUsageString(records: JsonRecord[], keys: string[]): string | null {
+    for (const record of records) {
+        for (const key of keys) {
+            const parsed = parseTexApiUsageString(record[key]);
+            if (parsed) {
+                return parsed;
+            }
+        }
+    }
+    return null;
+}
+
+function normalizeTexApiPartnerUsage(payload: unknown): TexApiPartnerUsageSummary {
+    const root = isJsonRecord(payload) ? payload : {};
+    const records = collectTexApiUsageRecords(root);
+    const totalCredits = pickTexApiUsageNumber(records, [
+        'total_credits_usd',
+        'budget_usd',
+        'credit_limit_usd',
+        'quota_usd',
+        'credits_usd',
+        'starting_credits_usd',
+    ]);
+    const usedCredits = pickTexApiUsageNumber(records, [
+        'used_credits_usd',
+        'spent_usd',
+        'total_spend_usd',
+        'total_cost_usd',
+        'usage_usd',
+        'consumed_usd',
+    ]);
+    const explicitRemaining = pickTexApiUsageNumber(records, [
+        'remaining_credits_usd',
+        'remaining_usd',
+        'available_credits_usd',
+        'balance_usd',
+        'credits_remaining_usd',
+    ]);
+    const totalRequests = pickTexApiUsageNumber(records, [
+        'total_requests',
+        'request_count',
+        'requests',
+        'request_total',
+    ]);
+    const periodStart = pickTexApiUsageString(records, [
+        'period_start',
+        'from',
+        'from_iso',
+        'window_start',
+        'starts_at',
+    ]);
+    const periodEnd = pickTexApiUsageString(records, [
+        'period_end',
+        'to',
+        'to_iso',
+        'window_end',
+        'ends_at',
+    ]);
+    const currency = pickTexApiUsageString(records, ['currency', 'currency_code']) || 'USD';
+    const remainingCredits = explicitRemaining ?? (
+        totalCredits !== null && usedCredits !== null
+            ? Math.max(0, totalCredits - usedCredits)
+            : null
+    );
+
+    return {
+        remaining_credits_usd: remainingCredits,
+        total_credits_usd: totalCredits,
+        used_credits_usd: usedCredits,
+        total_requests: totalRequests,
+        currency,
+        period_start: periodStart,
+        period_end: periodEnd,
+        raw: root,
+    };
+}
+
+export async function getTexApiPartnerUsage(): Promise<TexApiPartnerUsageSummary> {
+    const payload = await apiRequest<unknown>('/texapi-partner/usage');
+    return normalizeTexApiPartnerUsage(payload);
 }
 
 export async function listCloudBackups(limit: number = 20): Promise<CloudBackupListResponse> {

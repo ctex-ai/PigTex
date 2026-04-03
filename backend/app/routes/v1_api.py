@@ -4156,6 +4156,32 @@ def _normalize_upstream_models_payload(provider: str, payload: Any) -> dict:
     return {"object": "list", "data": normalized_data}
 
 
+def _normalize_models_payload_for_config(cfg: "ResolvedUpstreamConfig", payload: Any) -> dict:
+    normalized = _normalize_upstream_models_payload(cfg.api_provider, payload)
+    if cfg.source != TEXAPI_PARTNER_SOURCE:
+        return normalized
+
+    data = normalized.get("data")
+    if not isinstance(data, list):
+        return normalized
+
+    remapped: list[dict[str, Any]] = []
+    for model in data:
+        if not isinstance(model, dict):
+            continue
+        entry = dict(model)
+        upstream_provider = entry.get("provider_id") or entry.get("owned_by") or entry.get("transport")
+        if isinstance(upstream_provider, str) and upstream_provider.strip():
+            entry["upstream_provider_id"] = upstream_provider.strip()
+        entry["owned_by"] = "TexAPI"
+        entry["provider_id"] = "texapi"
+        entry["transport"] = "openai"
+        remapped.append(entry)
+
+    normalized["data"] = remapped
+    return normalized
+
+
 async def _persist_image_response_data(items: Any, owner_user_id: str) -> list[dict]:
     if not isinstance(items, list):
         return []
@@ -5729,7 +5755,7 @@ async def validate_provider_key(
             )
             
             if response.status_code == 200:
-                models_data = _normalize_upstream_models_payload(provider, response.json())
+                models_data = _normalize_models_payload_for_config(cfg, response.json())
                 _touch_legacy_key_usage(db, cfg.db_key_id)
                 return {
                     "valid": True,
@@ -6482,7 +6508,7 @@ async def v1_list_models(
 
                 if response.status_code == 200:
                     _touch_legacy_key_usage(db, cfg.db_key_id)
-                    return _normalize_upstream_models_payload(cfg.api_provider, response.json())
+                    return _normalize_models_payload_for_config(cfg, response.json())
 
                 if attempt == 1 and _should_retry_texapi_partner_auth_error(response, cfg):
                     cfg = await _hydrate_texapi_partner_config(cfg, current_user, force_refresh=True)

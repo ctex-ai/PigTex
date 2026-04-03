@@ -18,6 +18,7 @@ import {
     getModels,
     getModelsWithCredentials,
     getCloudUsage,
+    getTexApiPartnerUsage,
     getSyncEntitlement,
     listCloudBackups,
     pullCloudSync,
@@ -30,6 +31,7 @@ import type {
     CloudBackupListItem,
     CloudSyncState,
     CloudQuota,
+    TexApiPartnerUsageSummary,
     CloudUsageSummary,
     SyncEntitlement
 } from '../../services/api'
@@ -249,6 +251,48 @@ const formatByteSize = (value?: number | null): string => {
 
     const digits = normalized >= 100 ? 0 : normalized >= 10 ? 1 : 2
     return `${normalized.toFixed(digits)} ${units[unitIndex]}`
+}
+
+const formatCurrencyAmount = (
+    value: number | null | undefined,
+    locale: string = 'vi-VN',
+    currency: string = 'USD'
+): string => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+    const normalizedCurrency = (currency || 'USD').trim().toUpperCase() || 'USD'
+    try {
+        return new Intl.NumberFormat(locale, {
+            style: 'currency',
+            currency: normalizedCurrency,
+            minimumFractionDigits: value < 10 ? 2 : 0,
+            maximumFractionDigits: 2
+        }).format(value)
+    } catch {
+        return `${new Intl.NumberFormat(locale, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(value)} ${normalizedCurrency}`
+    }
+}
+
+const formatCountValue = (value: number | null | undefined, locale: string = 'vi-VN'): string => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+    return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value)
+}
+
+const formatDateRangeLabel = (
+    start: string | null | undefined,
+    end: string | null | undefined,
+    locale: string,
+    emptyLabel: string
+): string => {
+    if (!start && !end) return emptyLabel
+    const startLabel = start ? formatDateTimeLabel(start, locale, emptyLabel) : emptyLabel
+    const endLabel = end ? formatDateTimeLabel(end, locale, emptyLabel) : emptyLabel
+    if (start && end) {
+        return `${startLabel} → ${endLabel}`
+    }
+    return start ? startLabel : endLabel
 }
 
 const formatCloudStatusLabel = (status?: string | null, isVietnamese: boolean = true): string => {
@@ -527,6 +571,18 @@ const SettingsModal = ({
         providerManagedConnectionHint: 'Provider này không hỗ trợ nhập credential ở màn hình này.',
         providerManagedBaseUrlHint: 'Base URL này được quản lý ở tầng cấu hình khác.',
         providerManagedTestHint: 'Provider này không hỗ trợ test kết nối từ client.',
+        providerManagedTexapiConnectionHint: 'TexAPI ở đây được PigTex quản lý sẵn cho tài khoản của bạn.',
+        providerManagedTexapiHint: 'TexAPI trên PigTex dùng credits do PigTex quản lý, nên bạn không cần dán API key TexAPI ở đây. Nếu thấy các model như Qwen, DeepSeek hay GPT thì đó vẫn là catalog đi qua gateway TexAPI, và usage bị trừ vào credits TexAPI của tài khoản PigTex này. Muốn dùng key riêng, hãy chuyển sang OpenAI, Google, Anthropic hoặc Alibaba.',
+        texapiCreditsTitle: 'TexAPI credits',
+        texapiCreditsDescription: 'PigTex sẽ tự lo token gateway và usage cho provider này.',
+        texapiRemaining: 'Còn lại',
+        texapiUsed: 'Đã dùng',
+        texapiRequests: 'Lượt gọi',
+        texapiPeriod: 'Chu kỳ',
+        texapiUsageLoading: 'Đang tải usage TexAPI...',
+        texapiUsageLoadFailed: 'Không tải được usage TexAPI lúc này.',
+        texapiUsageEmpty: 'Tài khoản này chưa có usage TexAPI hiện ra.',
+        texapiSignInHint: 'Đăng nhập tài khoản PigTex để dùng credits TexAPI được cấp sẵn.',
         model: 'Model',
         loadingModels: 'Đang tải danh sách Model...',
         availableModels: (count: number) => `${count} model khả dụng`,
@@ -714,6 +770,18 @@ const SettingsModal = ({
         providerManagedConnectionHint: 'This provider does not accept credentials on this screen.',
         providerManagedBaseUrlHint: 'This Base URL is controlled by another configuration layer.',
         providerManagedTestHint: 'This provider does not support client-side connection testing.',
+        providerManagedTexapiConnectionHint: 'TexAPI on this screen is managed by PigTex for your account.',
+        providerManagedTexapiHint: 'TexAPI on PigTex uses credits managed by PigTex, so you do not paste a TexAPI key here. If you see model families such as Qwen, DeepSeek, or GPT, they are still being served through the TexAPI gateway and billed against this PigTex account\'s TexAPI credits. If you want to use your own key, switch to OpenAI, Google, Anthropic, or Alibaba.',
+        texapiCreditsTitle: 'TexAPI credits',
+        texapiCreditsDescription: 'PigTex manages the gateway token and usage for this provider.',
+        texapiRemaining: 'Remaining',
+        texapiUsed: 'Used',
+        texapiRequests: 'Requests',
+        texapiPeriod: 'Period',
+        texapiUsageLoading: 'Loading TexAPI usage...',
+        texapiUsageLoadFailed: 'Unable to load TexAPI usage right now.',
+        texapiUsageEmpty: 'No TexAPI usage details are available for this account yet.',
+        texapiSignInHint: 'Sign in to your PigTex account to use the included TexAPI credits.',
         model: 'Model',
         loadingModels: 'Loading model list...',
         availableModels: (count: number) => `${count} model(s) available`,
@@ -832,6 +900,10 @@ const SettingsModal = ({
     const [modelsError, setModelsError] = useState<string | null>(null)
     const [modelOptions, setModelOptions] = useState<string[]>([])
     const [modelReloadTick, setModelReloadTick] = useState(0)
+    const [texApiUsage, setTexApiUsage] = useState<TexApiPartnerUsageSummary | null>(null)
+    const [texApiUsageError, setTexApiUsageError] = useState<string | null>(null)
+    const [isLoadingTexApiUsage, setIsLoadingTexApiUsage] = useState(false)
+    const [texApiUsageReloadTick, setTexApiUsageReloadTick] = useState(0)
     const [deviceInfo, setDeviceInfo] = useState<DeviceSnapshot>(() => buildFallbackDeviceSnapshot(initialIsVietnamese))
     const [isLoadingDeviceInfo, setIsLoadingDeviceInfo] = useState(false)
     const [hasPasswordOverride, setHasPasswordOverride] = useState<boolean | null>(null)
@@ -869,6 +941,10 @@ const SettingsModal = ({
         setShowApiKey(false)
         setValidationFeedback(null)
         setHasPasswordOverride(null)
+        setTexApiUsage(null)
+        setTexApiUsageError(null)
+        setIsLoadingTexApiUsage(false)
+        setTexApiUsageReloadTick(0)
         setPasswordForm({
             currentPassword: '',
             newPassword: '',
@@ -920,11 +996,26 @@ const SettingsModal = ({
         || getApiProviderCatalogEntryForSelection(draft.apiProvider, draft.customEndpoint)
     const providerManagedByServer = Boolean(currentProviderConfig.managed_by_server)
     const providerAcceptsClientCredentials = currentProviderConfig.supports_byok && !providerManagedByServer
+    const isTexApiManagedProvider = selectedPublicProviderId === 'texapi'
+    const providerManagedConnectionHint = isTexApiManagedProvider
+        ? copy.providerManagedTexapiConnectionHint
+        : copy.providerManagedConnectionHint
     const isBaseUrlLocked = draft.apiProvider !== 'auto' || providerManagedByServer
     const modelPlaceholder = MODEL_PLACEHOLDER_BY_PROVIDER[effectiveProvider]
     const hasPassword = hasPasswordOverride ?? (user?.has_password ?? true)
     const accountProviderLabel = formatProviderLabel(user?.oauth_provider, previewIsVietnamese)
     const accountPlanLabel = formatPlanLabel(user?.plan, previewIsVietnamese)
+    const hasTexApiUsageData = Boolean(
+        texApiUsage
+        && (
+            texApiUsage.remaining_credits_usd !== null
+            || texApiUsage.total_credits_usd !== null
+            || texApiUsage.used_credits_usd !== null
+            || texApiUsage.total_requests !== null
+            || texApiUsage.period_start
+            || texApiUsage.period_end
+        )
+    )
     const secureStorageAvailability = useMemo<'available' | 'unavailable' | 'unknown'>(() => {
         if (typeof window === 'undefined' || !window.electronAPI?.isSecureStorageAvailable) {
             return 'unknown'
@@ -1058,6 +1149,19 @@ const SettingsModal = ({
                     setModelOptions([])
                     const message = error instanceof Error ? error.message : copy.modelLoadFailed
                     const normalized = message.toLowerCase()
+                    if (
+                        isTexApiManagedProvider
+                        && (
+                            normalized.includes('401')
+                            || normalized.includes('403')
+                            || normalized.includes('credentials')
+                            || normalized.includes('unauthorized')
+                            || normalized.includes('forbidden')
+                        )
+                    ) {
+                        setModelsError(copy.texapiSignInHint)
+                        return
+                    }
                     if (normalized.includes('404')) {
                         setModelsError(copy.modelLoadBaseUrlHint)
                         return
@@ -1083,8 +1187,56 @@ const SettingsModal = ({
         draft.apiProvider,
         draft.customEndpoint,
         effectiveProvider,
+        isTexApiManagedProvider,
         isOpen,
         modelReloadTick
+    ])
+
+    useEffect(() => {
+        if (!isOpen || activeTab !== 'connection') return
+        if (!isTexApiManagedProvider) {
+            setTexApiUsage(null)
+            setTexApiUsageError(null)
+            setIsLoadingTexApiUsage(false)
+            return
+        }
+        if (!user) {
+            setTexApiUsage(null)
+            setTexApiUsageError(copy.texapiSignInHint)
+            setIsLoadingTexApiUsage(false)
+            return
+        }
+
+        let disposed = false
+        setIsLoadingTexApiUsage(true)
+        setTexApiUsageError(null)
+
+        getTexApiPartnerUsage()
+            .then((usage) => {
+                if (disposed) return
+                setTexApiUsage(usage)
+            })
+            .catch((error) => {
+                if (disposed) return
+                setTexApiUsage(null)
+                setTexApiUsageError(error instanceof Error ? error.message : copy.texapiUsageLoadFailed)
+            })
+            .finally(() => {
+                if (disposed) return
+                setIsLoadingTexApiUsage(false)
+            })
+
+        return () => {
+            disposed = true
+        }
+    }, [
+        activeTab,
+        copy.texapiSignInHint,
+        copy.texapiUsageLoadFailed,
+        isOpen,
+        isTexApiManagedProvider,
+        texApiUsageReloadTick,
+        user?.id,
     ])
 
     useEffect(() => {
@@ -2435,7 +2587,7 @@ const SettingsModal = ({
                                                                     providerCredentialProfiles: profiles,
                                                                 }
                                                             })}
-                                                            placeholder={providerManagedByServer ? copy.providerManagedConnectionHint : copy.getKey}
+                                                            placeholder={providerManagedByServer ? providerManagedConnectionHint : copy.getKey}
                                                             disabled={providerManagedByServer}
                                                             className="stg-input"
                                                         />
@@ -2450,7 +2602,7 @@ const SettingsModal = ({
                                                         </button>
                                                     </div>
                                                     {providerManagedByServer ? (
-                                                        <span className="stg-hint">{copy.providerManagedConnectionHint}</span>
+                                                        <span className="stg-hint">{providerManagedConnectionHint}</span>
                                                     ) : null}
                                                 </div>
 
@@ -2488,6 +2640,74 @@ const SettingsModal = ({
                                                             : ` · ${copy.baseUrlCustomHint}`}
                                                     </span>
                                                 </div>
+
+                                                {isTexApiManagedProvider && (
+                                                    <div className="stg-field">
+                                                        <div className="stg-inline-note">
+                                                            {copy.providerManagedTexapiHint}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {isTexApiManagedProvider && (
+                                                    <div className="stg-field">
+                                                        <div className="stg-field-row">
+                                                            <label className="stg-label">{copy.texapiCreditsTitle}</label>
+                                                            <button
+                                                                type="button"
+                                                                className="stg-mini-btn"
+                                                                onClick={() => setTexApiUsageReloadTick(prev => prev + 1)}
+                                                                disabled={isLoadingTexApiUsage}
+                                                            >
+                                                                <RefreshCw size={12} className={isLoadingTexApiUsage ? 'spin' : ''} />
+                                                                {copy.reload}
+                                                            </button>
+                                                        </div>
+                                                        <span className="stg-hint">{copy.texapiCreditsDescription}</span>
+                                                        {texApiUsageError && (
+                                                            <div className="stg-danger-note">
+                                                                {texApiUsageError}
+                                                            </div>
+                                                        )}
+                                                        {hasTexApiUsageData ? (
+                                                            <div className="stg-info-grid">
+                                                                <div className="stg-info-card">
+                                                                    <span className="stg-info-label">{copy.texapiRemaining}</span>
+                                                                    <span className="stg-info-value">
+                                                                        {formatCurrencyAmount(texApiUsage?.remaining_credits_usd, previewLocale, texApiUsage?.currency || 'USD')}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="stg-info-card">
+                                                                    <span className="stg-info-label">{copy.texapiUsed}</span>
+                                                                    <span className="stg-info-value">
+                                                                        {formatCurrencyAmount(texApiUsage?.used_credits_usd, previewLocale, texApiUsage?.currency || 'USD')}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="stg-info-card">
+                                                                    <span className="stg-info-label">{copy.texapiRequests}</span>
+                                                                    <span className="stg-info-value">
+                                                                        {formatCountValue(texApiUsage?.total_requests, previewLocale)}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="stg-info-card">
+                                                                    <span className="stg-info-label">{copy.texapiPeriod}</span>
+                                                                    <span className="stg-info-value">
+                                                                        {formatDateRangeLabel(
+                                                                            texApiUsage?.period_start,
+                                                                            texApiUsage?.period_end,
+                                                                            previewLocale,
+                                                                            copy.noData
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        ) : !texApiUsageError ? (
+                                                            <span className="stg-hint">
+                                                                {isLoadingTexApiUsage ? copy.texapiUsageLoading : copy.texapiUsageEmpty}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                )}
 
                                                 {/* Model */}
                                                 <div className="stg-field">
@@ -2536,7 +2756,7 @@ const SettingsModal = ({
                                                     <button
                                                         className="stg-test-btn"
                                                         onClick={handleTestConnection}
-                                                        disabled={isValidating}
+                                                        disabled={isValidating || !providerAcceptsClientCredentials}
                                                         type="button"
                                                     >
                                                         <Plug size={14} />

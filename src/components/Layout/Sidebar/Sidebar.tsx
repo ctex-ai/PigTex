@@ -98,7 +98,7 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
     isInstallingDesktopUpdate = false,
     onInstallDesktopUpdate
 }, ref) => {
-    const { isVietnamese, locale } = useI18n()
+    const { isVietnamese } = useI18n()
     const { user } = useAuth()
     const copy = isVietnamese ? {
         user: 'Người dùng',
@@ -403,16 +403,6 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
         }
     }
 
-    const formatLearningDate = useCallback((value?: string | null) => {
-        if (!value) return ''
-        const date = new Date(value)
-        if (Number.isNaN(date.getTime())) return value
-        return new Intl.DateTimeFormat(locale, {
-            day: '2-digit',
-            month: 'short'
-        }).format(date)
-    }, [locale])
-
     const handleOpenLearningProgram = useCallback((program: LearningProgramSummary) => {
         onWorkspaceSelect(program.workspace_id ?? null)
         onConversationSelect(null)
@@ -663,7 +653,7 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
                     </div>
                 </div>
 
-                <div className="sidebar-section">
+                <div className="sidebar-section sidebar-learn-section">
                     <div className="sidebar-section-header">
                         <span className="sidebar-section-title">{copy.learn}</span>
                         {learningReviews.length > 0 && (
@@ -672,7 +662,7 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
                             </span>
                         )}
                     </div>
-                    <div className="sidebar-items learning-sidebar-items">
+                    <div className="sidebar-items learning-sidebar-items sidebar-learn-items">
                         {isLearningLoading ? (
                             <div className="sidebar-loading">{copy.loading}</div>
                         ) : (
@@ -682,29 +672,17 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
                                         {learningReviews.slice(0, 3).map((review) => (
                                             <button
                                                 key={`${review.program_id}-${review.node?.id ?? 'review'}`}
-                                                className="learning-review-card"
+                                                className={`chat-item learning-sidebar-item ${review.program_id === selectedLearningProgramId ? 'active' : ''}`}
                                                 onClick={() => handleOpenLearningReview(review)}
                                                 title={copy.reviewNode}
                                             >
-                                                <div className="learning-review-card-header">
-                                                    <span className="learning-review-card-title">
-                                                        {review.node?.title || review.program_title}
-                                                    </span>
-                                                    {review.node?.review_due_at && (
-                                                        <span className="learning-review-card-date">
-                                                            {formatLearningDate(review.node.review_due_at)}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <div className="learning-review-card-program">{review.program_title}</div>
-                                                {review.node?.summary && (
-                                                    <div className="learning-review-card-summary">{review.node.summary}</div>
-                                                )}
+                                                <BookOpen size={14} className="learning-sidebar-item-icon" />
+                                                <span className="chat-title">
+                                                    {review.node?.title || review.program_title}
+                                                </span>
                                             </button>
                                         ))}
                                     </div>
-                                ) : learningPrograms.length > 0 ? (
-                                    <div className="sidebar-empty-hint">{copy.noReviewsDue}</div>
                                 ) : null}
 
                                 {learningPrograms.length === 0 ? (
@@ -714,30 +692,12 @@ const Sidebar = forwardRef<SidebarHandle, SidebarProps>(({
                                         {learningPrograms.slice(0, 4).map((program) => (
                                             <button
                                                 key={program.id}
-                                                className={`learning-program-card ${program.id === selectedLearningProgramId ? 'active' : ''}`}
+                                                className={`chat-item learning-sidebar-item ${program.id === selectedLearningProgramId ? 'active' : ''}`}
                                                 onClick={() => handleOpenLearningProgram(program)}
                                                 title={copy.continueProgram}
                                             >
-                                                <div className="learning-program-card-header">
-                                                    <span className="learning-program-card-title">{program.title}</span>
-                                                    <span className="learning-program-card-scope">
-                                                        {program.workspace_name
-                                                            ? `${copy.workspaceScope} / ${program.workspace_name}`
-                                                            : copy.standaloneScope}
-                                                    </span>
-                                                </div>
-                                                <div className="learning-program-card-meta">
-                                                    <span>{copy.progressCompact(program.completed_nodes, program.total_nodes)}</span>
-                                                    {program.due_review_count > 0 && (
-                                                        <span>{copy.reviewDueBadge(program.due_review_count)}</span>
-                                                    )}
-                                                </div>
-                                                {program.next_node_title && (
-                                                    <div className="learning-program-card-next">
-                                                        <span className="learning-program-card-next-label">{copy.nextNode}</span>
-                                                        <span className="learning-program-card-next-value">{program.next_node_title}</span>
-                                                    </div>
-                                                )}
+                                                <BookOpen size={14} className="learning-sidebar-item-icon" />
+                                                <span className="chat-title">{program.title}</span>
                                             </button>
                                         ))}
                                     </div>
